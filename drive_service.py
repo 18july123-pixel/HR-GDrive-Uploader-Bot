@@ -531,66 +531,67 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
     # FIX #5: wrap the resumable upload loop so HttpErrors surface clearly
     # If running without a per-user token, run via the GoogleClientManager so
     # failures are classified and the client state is updated.
-    if user_token is None:
-        def _op(credentials):
-            attempt = 1
-            while True:
-                try:
-                    drive = get_drive(credentials)
-                    media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
-                    request = drive.files().create(
-                        body={"name": filename, "parents": [parent_id]},
-                        media_body=media,
-                        fields="id, name, size, webViewLink",
-                    )
-                    response = None
-                    while response is None:
-                        status, response = request.next_chunk()
-                        if status and progress_cb:
-                            progress_cb(status.progress())
-                    return response
-                except (HttpError, RefreshError) as e:
-                    reason = getattr(e, "reason", None) or str(e)
-                    if attempt >= max_attempts or not _is_retryable_upload_error(e):
-                        raise RuntimeError(f"Drive API error uploading '{filename}': {reason}") from e
-                    attempt += 1
-                    if retry_cb:
-                        retry_cb(attempt, max_attempts, reason)
-                    time.sleep(backoff_seconds * (2 ** (attempt - 2)))
+    try:
+        if user_token is None:
+            def _op(credentials):
+                attempt = 1
+                while True:
+                    try:
+                        drive = get_drive(credentials)
+                        media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
+                        request = drive.files().create(
+                            body={"name": filename, "parents": [parent_id]},
+                            media_body=media,
+                            fields="id, name, size, webViewLink",
+                        )
+                        response = None
+                        while response is None:
+                            status, response = request.next_chunk()
+                            if status and progress_cb:
+                                progress_cb(status.progress())
+                        return response
+                    except (HttpError, RefreshError) as e:
+                        reason = getattr(e, "reason", None) or str(e)
+                        if attempt >= max_attempts or not _is_retryable_upload_error(e):
+                            raise RuntimeError(f"Drive API error uploading '{filename}': {reason}") from e
+                        attempt += 1
+                        if retry_cb:
+                            retry_cb(attempt, max_attempts, reason)
+                        time.sleep(backoff_seconds * (2 ** (attempt - 2)))
 
-        res = google_manager.execute(_op)
-        # Invalidate parent listing so the uploaded file appears
-        try:
-            _cache_invalidate_near(file_id=res.get("id"), parent_id=parent_id)
-        except Exception:
-            pass
-        return res
+            res = google_manager.execute(_op)
+            # Invalidate parent listing so the uploaded file appears
+            try:
+                _cache_invalidate_near(file_id=res.get("id"), parent_id=parent_id)
+            except Exception:
+                pass
+            return res
 
-    # Default per-user token flow
-    attempt = 1
-    while True:
-        try:
-            drive = get_drive(user_token)
-            media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
-            request = drive.files().create(
-                body={"name": filename, "parents": [parent_id]},
-                media_body=media,
-                fields="id, name, size, webViewLink",
-            )
-            response = None
-            while response is None:
-                status, response = request.next_chunk()
-                if status and progress_cb:
-                    progress_cb(status.progress())
-            return response
-        except (HttpError, RefreshError) as e:
-            reason = getattr(e, "reason", None) or str(e)
-            if attempt >= max_attempts or not _is_retryable_upload_error(e):
-                raise RuntimeError(f"Drive API error uploading '{filename}': {reason}") from e
-            attempt += 1
-            if retry_cb:
-                retry_cb(attempt, max_attempts, reason)
-            time.sleep(backoff_seconds * (2 ** (attempt - 2)))
+        # Default per-user token flow
+        attempt = 1
+        while True:
+            try:
+                drive = get_drive(user_token)
+                media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
+                request = drive.files().create(
+                    body={"name": filename, "parents": [parent_id]},
+                    media_body=media,
+                    fields="id, name, size, webViewLink",
+                )
+                response = None
+                while response is None:
+                    status, response = request.next_chunk()
+                    if status and progress_cb:
+                        progress_cb(status.progress())
+                return response
+            except (HttpError, RefreshError) as e:
+                reason = getattr(e, "reason", None) or str(e)
+                if attempt >= max_attempts or not _is_retryable_upload_error(e):
+                    raise RuntimeError(f"Drive API error uploading '{filename}': {reason}") from e
+                attempt += 1
+                if retry_cb:
+                    retry_cb(attempt, max_attempts, reason)
+                time.sleep(backoff_seconds * (2 ** (attempt - 2)))
     finally:
         try:
             _cache_invalidate_list_for_parent(parent_id)
