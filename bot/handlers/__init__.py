@@ -7,11 +7,13 @@ from .clone import router as clone_router
 from .drive_browser import router as drive_router
 from .stats import router as stats_router
 from .admin import router as admin_router
+from .gclient_admin import router as gclient_admin_router
 
 
 def register_all_routers(dp: Dispatcher):
     # Order matters: admin & auth first so their commands aren't shadowed
     dp.include_router(admin_router)
+    dp.include_router(gclient_admin_router)
     dp.include_router(auth_router)
     dp.include_router(start_router)
     dp.include_router(upload_router)
