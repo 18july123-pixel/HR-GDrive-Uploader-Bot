@@ -113,3 +113,9 @@ def delete_confirm(file_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Cancel", callback_data=f"drive:cancel:{file_id}"),
     )
     return b.as_markup()
+
+
+def job_actions(job_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="❌ Cancel", callback_data=f"job:cancel:{job_id}"))
+    return b.as_markup()

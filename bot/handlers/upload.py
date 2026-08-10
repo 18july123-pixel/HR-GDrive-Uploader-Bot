@@ -19,6 +19,8 @@ from utils import format_duration, html_link, human_bytes, progress_bar, safe_an
 from bot.states import UploadStates
 from bot.keyboards import duplicate_confirm
 from bot.job_manager import manager, Job
+from bot.keyboards import job_actions
+from aiogram.filters import CommandObject
 
 log = logging.getLogger("gdrive_bot.upload")
 router = Router()
@@ -202,6 +204,7 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
                     elapsed=now - started_at,
                 ),
                 parse_mode="HTML",
+                reply_markup=job_actions(job_id),
             )
             asyncio.run_coroutine_threadsafe(update, loop)
 
@@ -223,6 +226,7 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
                             retry_info=reason,
                         ),
                         parse_mode="HTML",
+                        reply_markup=job_actions(job_id),
                     ),
                     loop,
                 )
@@ -256,10 +260,11 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
             f"✅ Uploaded successfully!\n\n📄 {html_link(result_name, link)}\n"
             f"💾 {human_bytes(size)}",
             parse_mode="HTML",
+            reply_markup=job_actions(job_id),
         )
     except Exception as e:
         db.update_job(job_id, status="error", error=str(e))
-        await status_msg.edit_text(f"❌ Upload failed: {html.escape(str(e))}", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ Upload failed: {html.escape(str(e))}", parse_mode="HTML", reply_markup=job_actions(job_id))
     finally:
         if os.path.exists(local_path):
             os.remove(local_path)
@@ -322,7 +327,7 @@ async def _upload_worker(user_id: int):
             except Exception as exc:
                 log.exception("Queued upload %s failed", item.get("job_id"))
                 db.update_job(item["job_id"], status="error", error=str(exc))
-                await item["status_msg"].edit_text(f"❌ Upload failed: {html.escape(str(exc))}", parse_mode="HTML")
+                await item["status_msg"].edit_text(f"❌ Upload failed: {html.escape(str(exc))}", parse_mode="HTML", reply_markup=job_actions(item["job_id"]))
             finally:
                 queue.task_done()
     except asyncio.CancelledError:
@@ -379,6 +384,7 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
             elapsed=0,
         ),
         parse_mode="HTML",
+        reply_markup=job_actions(job_id),
     )
     # Defer download/upload work to the central JobManager so workers can
     # run in parallel and persist job metadata.
@@ -483,3 +489,61 @@ async def cb_duplicate_decision(call: CallbackQuery, state: FSMContext):
             pending["filename"], pending["size"], pending["folder_id"], pending["user_id"],
         )
         return
+
+
+@router.callback_query(F.data.startswith("job:"))
+async def cb_job_action(call: CallbackQuery):
+    parts = (call.data or "").split(":", 2)
+    if len(parts) != 3:
+        await safe_answer(call, "Invalid action", show_alert=True)
+        return
+    _, action, job_id_str = parts
+    try:
+        job_id = int(job_id_str)
+    except ValueError:
+        await safe_answer(call, "Invalid job id", show_alert=True)
+        return
+    job = manager.jobs.get(job_id)
+    if not job:
+        await safe_answer(call, "Job not found", show_alert=True)
+        return
+    # permission check
+    if job.user_id != call.from_user.id and call.from_user.id not in cfg.ADMIN_IDS:
+        await safe_answer(call, "You don't have permission to control this job.", show_alert=True)
+        return
+
+    if action == "cancel":
+        ok = manager.cancel(job_id)
+        await safe_answer(call)
+        if ok:
+            try:
+                await job.status_msg.edit_text(f"❌ Cancelled job #{job_id}", parse_mode="HTML")
+            except Exception:
+                pass
+        else:
+            await safe_answer(call, "Could not cancel job.", show_alert=True)
+        return
+
+
+@router.message(Command("canceljob"))
+async def cmd_canceljob(message: Message, command: CommandObject):
+    if not command.args:
+        await message.answer("Usage: /canceljob <job_id>")
+        return
+    try:
+        jid = int(command.args.strip())
+    except ValueError:
+        await message.answer("Invalid job id")
+        return
+    job = manager.jobs.get(jid)
+    if not job:
+        await message.answer("Job not found.")
+        return
+    # Admins may cancel any job
+    if job.user_id != message.from_user.id and message.from_user.id not in cfg.ADMIN_IDS:
+        await message.answer("You don't have permission to cancel that job.")
+        return
+    if manager.cancel(jid):
+        await message.answer(f"❌ Cancelled job #{jid}")
+    else:
+        await message.answer("Could not cancel job.")

@@ -8,6 +8,7 @@ import database as db
 from config import cfg
 import drive_service
 from utils import safe_edit_text, html_link, human_bytes, format_duration
+from bot.keyboards import job_actions
 
 log = logging.getLogger("gdrive_bot.jobmgr")
 
@@ -31,6 +32,7 @@ class Job:
     finished_at: float | None = None
     progress: float = 0.0
     error: str | None = None
+    
 
 
 class JobManager:
@@ -65,6 +67,23 @@ class JobManager:
         # return position roughly (not exact under concurrency)
         return self._queue_position(job.job_id)
 
+    def cancel(self, job_id: int) -> bool:
+        job = self.jobs.get(job_id)
+        if not job:
+            return False
+        job.status = "cancelled"
+        
+        import database as db
+        db.update_job(job_id, status="cancelled", error="Cancelled by user")
+        # attempt best-effort local cleanup
+        try:
+            import os
+            if job.local_path and os.path.exists(job.local_path):
+                os.remove(job.local_path)
+        except Exception:
+            pass
+        return True
+
     def _queue_position(self, job_id: int) -> int:
         # approximate queue position by iterating current items
         try:
@@ -83,6 +102,11 @@ class JobManager:
                 job = self.jobs.get(job_id)
                 if not job:
                     self.pending_q.task_done()
+                    continue
+                # respect cancelled state before starting
+                if job.status == "cancelled":
+                    self.pending_q.task_done()
+                    await asyncio.sleep(0.1)
                     continue
                 job.status = "downloading"
                 job.started_at = time.time()
@@ -122,13 +146,14 @@ class JobManager:
                     }
                     db.update_job(job.job_id, status="duplicate_pending")
                     if job.status_msg:
-                        await safe_edit_text(job.status_msg, "⚠️ Duplicate detected — please choose an action.",)
+                        await safe_edit_text(job.status_msg, "⚠️ Duplicate detected — please choose an action.", reply_markup=job_actions(job.job_id))
                     self.pending_q.task_done()
                     continue
 
-                # enqueue for upload
-                job.status = "uploading"
-                await self.upload_q.put(job.job_id)
+                # enqueue for upload (respect cancellation)
+                if job.status != "cancelled":
+                    job.status = "uploading"
+                    await self.upload_q.put(job.job_id)
                 db.update_job(job.job_id, status="running")
                 self.pending_q.task_done()
             except asyncio.CancelledError:
@@ -144,6 +169,12 @@ class JobManager:
                 if not job:
                     self.upload_q.task_done()
                     continue
+                # respect cancelled state before starting
+                if job.status == "cancelled":
+                    self.upload_q.task_done()
+                    await asyncio.sleep(0.1)
+                    continue
+
                 # perform upload in thread
                 def progress_cb(pct):
                     job.progress = pct
@@ -158,13 +189,13 @@ class JobManager:
                     db.update_job(job.job_id, status="done", progress=100, bytes_total=job.size, bytes_done=job.size)
                     db.increment_stat(job.user_id, uploads=1, uploaded_bytes=job.size or 0)
                     if job.status_msg:
-                        await safe_edit_text(job.status_msg, f"✅ Uploaded: {job.filename}\n📦 {human_bytes(job.size)}")
+                        await safe_edit_text(job.status_msg, f"✅ Uploaded: {job.filename}\n📦 {human_bytes(job.size)}", reply_markup=job_actions(job.job_id))
                 except Exception as e:
                     job.status = "error"
                     job.error = str(e)
                     db.update_job(job.job_id, status="error", error=str(e))
                     if job.status_msg:
-                        await safe_edit_text(job.status_msg, f"❌ Upload failed: {str(e)}")
+                        await safe_edit_text(job.status_msg, f"❌ Upload failed: {str(e)}", reply_markup=job_actions(job.job_id))
                 finally:
                     # cleanup local file
                     try:
