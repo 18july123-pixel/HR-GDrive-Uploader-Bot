@@ -2,6 +2,7 @@ import re
 import hashlib
 from contextlib import contextmanager
 from threading import Lock
+from typing import Dict
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError  # FIX #5: needed for structured error handling
 from googleapiclient.http import MediaFileUpload

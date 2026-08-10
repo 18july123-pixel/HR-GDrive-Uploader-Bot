@@ -49,7 +49,7 @@ class GoogleClientManager:
     """
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._clients: Dict[str, GoogleClientRecord] = {}
         self._order: List[str] = []
         self._rr_index = 0
@@ -156,7 +156,8 @@ class GoogleClientManager:
                 logger.info("Google API clients | Multi-Client: %s | Detected: %d | Valid: %d",
                             "ENABLED" if cfg.GOOGLE_MULTI_CLIENT_ENABLED else "DISABLED",
                             total, valid)
-                for rec in self.list_clients():
+                for cid in self._order:
+                    rec = self._clients[cid]
                     logger.info(" - %s | status=%s | enabled=%s | last_used=%s",
                                 rec.name, rec.status, rec.enabled,
                                 datetime.fromtimestamp(rec.last_used).isoformat() if rec.last_used else "-")
