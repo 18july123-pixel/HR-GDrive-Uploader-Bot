@@ -56,7 +56,150 @@ def get_drive(user_token_or_creds):
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
-def get_about(user_token: dict) -> dict:
+@contextmanager
+def _handle_sheets_errors(operation: str):
+    try:
+        yield
+    except (HttpError, RefreshError) as e:
+        reason = getattr(e, "reason", None) or str(e)
+        raise RuntimeError(f"Sheets API error while {operation}: {reason}") from e
+
+
+def get_sheets(user_token_or_creds):
+    """Return a Google Sheets API client for the given user credentials or global client."""
+    if isinstance(user_token_or_creds, dict):
+        creds = credentials_from_dict(user_token_or_creds)
+    elif isinstance(user_token_or_creds, GoogleCredentials):
+        creds = user_token_or_creds
+    elif user_token_or_creds is None:
+        client = google_manager.get_available_client()
+        if not client:
+            raise RuntimeError("No Google clients available in manager")
+        creds = google_manager.get_credentials_for(client)
+    else:
+        creds = user_token_or_creds
+    return build("sheets", "v4", credentials=creds, cache_discovery=False)
+
+
+def get_spreadsheet(user_token: dict, spreadsheet_id: str, fields: str | None = None) -> dict:
+    with _handle_sheets_errors(f"reading spreadsheet '{spreadsheet_id}'"):
+        sheets = get_sheets(user_token)
+        request = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id)
+        if fields:
+            request = request.fields(fields)
+        return request.execute(num_retries=3)
+
+
+def create_spreadsheet(user_token: dict, title: str, sheets: list[dict] | None = None, locale: str | None = None) -> dict:
+    body = {"properties": {"title": title}}
+    if locale:
+        body["properties"]["locale"] = locale
+    if sheets is not None:
+        body["sheets"] = sheets
+    with _handle_sheets_errors(f"creating spreadsheet '{title}'"):
+        return get_sheets(user_token).spreadsheets().create(body=body).execute(num_retries=3)
+
+
+def get_spreadsheet_values(user_token: dict, spreadsheet_id: str, range_name: str, major_dimension: str = "ROWS") -> dict:
+    with _handle_sheets_errors(f"reading values for '{spreadsheet_id}' range '{range_name}'"):
+        return get_sheets(user_token).spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            majorDimension=major_dimension,
+        ).execute(num_retries=3)
+
+
+def append_spreadsheet_values(
+    user_token: dict,
+    spreadsheet_id: str,
+    range_name: str,
+    values: list[list],
+    value_input_option: str = "RAW",
+    insert_data_option: str = "OVERWRITE",
+    include_values_in_response: bool = False,
+    response_value_render_option: str = "FORMATTED_VALUE",
+    response_date_time_render_option: str = "FORMATTED_STRING",
+) -> dict:
+    with _handle_sheets_errors(f"appending values to '{spreadsheet_id}' range '{range_name}'"):
+        return get_sheets(user_token).spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption=value_input_option,
+            insertDataOption=insert_data_option,
+            includeValuesInResponse=include_values_in_response,
+            responseValueRenderOption=response_value_render_option,
+            responseDateTimeRenderOption=response_date_time_render_option,
+            body={"values": values},
+        ).execute(num_retries=3)
+
+
+def batch_update_spreadsheet(user_token: dict, spreadsheet_id: str, requests: list[dict], include_spreadsheet_in_response: bool = False) -> dict:
+    with _handle_sheets_errors(f"batch updating spreadsheet '{spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={
+                "requests": requests,
+                "includeSpreadsheetInResponse": include_spreadsheet_in_response,
+            },
+        ).execute(num_retries=3)
+
+
+def copy_sheet_to_spreadsheet(user_token: dict, spreadsheet_id: str, sheet_id: int, destination_spreadsheet_id: str) -> dict:
+    with _handle_sheets_errors(f"copying sheet {sheet_id} from '{spreadsheet_id}' to '{destination_spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().sheets().copyTo(
+            spreadsheetId=spreadsheet_id,
+            sheetId=sheet_id,
+            body={"destinationSpreadsheetId": destination_spreadsheet_id},
+        ).execute(num_retries=3)
+
+
+def get_spreadsheet_developer_metadata(user_token: dict, spreadsheet_id: str, metadata_id: int) -> dict:
+    with _handle_sheets_errors(f"reading developer metadata {metadata_id} from '{spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().developerMetadata().get(
+            spreadsheetId=spreadsheet_id,
+            metadataId=metadata_id,
+        ).execute(num_retries=3)
+
+
+def search_spreadsheet_developer_metadata(user_token: dict, spreadsheet_id: str, data_filter: dict) -> dict:
+    with _handle_sheets_errors(f"searching developer metadata in '{spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().developerMetadata().search(
+            spreadsheetId=spreadsheet_id,
+            body={"dataFilter": data_filter},
+        ).execute(num_retries=3)
+
+
+def get_spreadsheet_values_batch_get(user_token: dict, spreadsheet_id: str, ranges: list[str], major_dimension: str = "ROWS") -> dict:
+    with _handle_sheets_errors(f"reading values for '{spreadsheet_id}' ranges"):
+        return get_sheets(user_token).spreadsheets().values().batchGet(
+            spreadsheetId=spreadsheet_id,
+            ranges=ranges,
+            majorDimension=major_dimension,
+        ).execute(num_retries=3)
+
+
+def batch_clear_spreadsheet_values(user_token: dict, spreadsheet_id: str, ranges: list[str]) -> dict:
+    with _handle_sheets_errors(f"clearing values in '{spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().values().batchClear(
+            spreadsheetId=spreadsheet_id,
+            body={"ranges": ranges},
+        ).execute(num_retries=3)
+
+
+def batch_clear_spreadsheet_values_by_data_filter(user_token: dict, spreadsheet_id: str, data_filters: list[dict]) -> dict:
+    with _handle_sheets_errors(f"clearing values by data filter in '{spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().values().batchClearByDataFilter(
+            spreadsheetId=spreadsheet_id,
+            body={"dataFilters": data_filters},
+        ).execute(num_retries=3)
+
+
+def batch_get_spreadsheet_values_by_data_filter(user_token: dict, spreadsheet_id: str, data_filters: list[dict], major_dimension: str = "ROWS") -> dict:
+    with _handle_sheets_errors(f"getting values by data filter in '{spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().values().batchGetByDataFilter(
+            spreadsheetId=spreadsheet_id,
+            body={"dataFilters": data_filters, "majorDimension": major_dimension},
+        ).execute(num_retries=3)
     # FIX #5: wrap Drive API call so callers get a clear error message
     try:
         drive = get_drive(user_token)
