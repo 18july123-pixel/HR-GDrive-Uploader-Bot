@@ -482,11 +482,12 @@ async def cb_duplicate_decision(call: CallbackQuery, state: FSMContext):
             await call.message.edit_text("☁️ Your Google Drive got disconnected. Use /login and resend the file.")
             return
         db.update_job(job_id, status="running")
+        destination_path = await asyncio.to_thread(drive_service.get_folder_path, token, pending["folder_id"])
         # _finalize_upload edits call.message itself (to "Uploading..." then the
         # final result) - don't pre-edit here, Telegram rejects a no-op edit.
         await _finalize_upload(
             job_id, call.message, token, local_path,
-            pending["filename"], pending["size"], pending["folder_id"], pending["user_id"],
+            pending["filename"], pending["size"], pending["folder_id"], destination_path, pending["user_id"],
         )
         return
 
