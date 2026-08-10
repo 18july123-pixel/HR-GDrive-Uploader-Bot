@@ -1,6 +1,6 @@
-# GDRVE — Google Drive Telegram Bot
+# HR Gdrive Uploader Bot
 
-A fast, reliable Telegram bot for uploading, cloning and managing Google Drive files.
+A fast, reliable Telegram bot for uploading, cloning and managing Google Drive files for HR workflows.
 
 **Quick highlights**
 - Supports Google OAuth and multiple accounts.
