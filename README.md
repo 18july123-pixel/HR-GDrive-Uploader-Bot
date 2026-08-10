@@ -49,6 +49,54 @@ docker run --rm -p 8080:8080 \
 - Provide environment variables (`BOT_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `WEBHOOK_SECRET`).
 - Leave `USE_WEBHOOK` default (`auto`) to enable automatic webhook detection.
 
+**Deployment — Production (recommended)**
+
+- Ensure you have a public HTTPS domain (example: `https://bot.example.com`).
+- Set `WEBHOOK_BASE_URL` to that domain (no trailing slash):
+
+```bash
+# example: export in your platform or CI
+export WEBHOOK_BASE_URL="https://bot.example.com"
+export BOT_TOKEN="<your-telegram-bot-token>"
+export GOOGLE_CLIENT_ID="<client-id>"
+export GOOGLE_CLIENT_SECRET="<client-secret>"
+```
+
+- By default the service will build `OAUTH_REDIRECT_URI` from `WEBHOOK_BASE_URL` as:
+
+```
+<WEBHOOK_BASE_URL>/oauth/callback
+```
+
+- If you prefer a custom redirect path set `OAUTH_REDIRECT_URI` explicitly to the full https URL.
+
+- Build, tag and push a container image to your registry, then deploy the image on your platform. Example (Docker Hub):
+
+```bash
+docker build -t youruser/hr-gdrive-uploader:latest .
+docker push youruser/hr-gdrive-uploader:latest
+```
+
+- Create persistent volumes for `/app/data` (SQLite DB) and `/app/downloads` (temp files) using your platform UI or `docker run -v`.
+- Set the following environment variables in the platform service: `BOT_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `WEBHOOK_BASE_URL`, optional `OAUTH_REDIRECT_URI`, `DB_PATH`, `DOWNLOAD_DIR`, `WEBHOOK_SECRET`.
+
+**Register your domain in Google Cloud Console (OAuth redirect)**
+
+1. Open the Google Cloud Console -> APIs & Services -> Credentials.
+2. Edit the OAuth 2.0 Client ID used by this project (or create one).
+3. In **Authorized redirect URIs** add the exact redirect URL the app will use, for example:
+
+```
+https://bot.example.com/oauth/callback
+```
+
+Notes:
+- The redirect URI must match `cfg.OAUTH_REDIRECT_URI` exactly (scheme, domain, path).
+- For local testing (ngrok/localtunnel) add the tunnel URL (e.g. `https://0123-45-67-89.ngrok.io/oauth/callback`) to the authorized redirect URIs and set `OAUTH_REDIRECT_URI` accordingly.
+- Google rejects plain HTTP redirect URIs except for `localhost`; in production always use HTTPS.
+
+If you want, I can add a GitHub Actions workflow to build and push the image automatically on `main`.
+
 **Configuration (important env vars)**
 - `BOT_TOKEN` — Telegram bot token (required).
 - `ADMIN_IDS` — comma-separated Telegram IDs for admin commands.
