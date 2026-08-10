@@ -2,16 +2,36 @@
 import json
 import time
 from pymongo import MongoClient, ReturnDocument
+from pymongo.errors import PyMongoError
 
 from config import cfg
 
-_client = MongoClient(cfg.MONGO_URI, serverSelectionTimeoutMS=5000)
-_db = _client[cfg.MONGO_DB_NAME]
-_users = _db.users
-_jobs = _db.jobs
-_history = _db.history
-_state = _db.bot_state
-_counters = _db.counters
+_client = None
+_db = None
+_users = None
+_jobs = None
+_history = None
+_state = None
+_counters = None
+
+
+def _connect_mongo():
+    global _client, _db, _users, _jobs, _history, _state, _counters
+    if _client is not None:
+        return
+    _client = MongoClient(cfg.MONGO_URI, serverSelectionTimeoutMS=5000)
+    _db = _client[cfg.MONGO_DB_NAME]
+    _users = _db.users
+    _jobs = _db.jobs
+    _history = _db.history
+    _state = _db.bot_state
+    _counters = _db.counters
+
+
+def _ensure_mongo():
+    if _client is None:
+        _connect_mongo()
+    return _client, _db
 
 _ALLOWED_USER_FIELDS = {
     "default_folder_id", "is_banned", "is_premium",
@@ -22,13 +42,17 @@ _ALLOWED_JOB_FIELDS = {
 
 
 def init_db():
-    _users.create_index("user_id", unique=True)
-    _jobs.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
-    _history.create_index([("user_id", 1), ("created_at", -1)])
-    _state.create_index("key", unique=True)
-    _state.update_one({"key": "bot_enabled"}, {"$setOnInsert": {"value": "1"}}, upsert=True)
-    _state.update_one({"key": "maintenance"}, {"$setOnInsert": {"value": "0"}}, upsert=True)
-    _client.admin.command("ping")
+    _ensure_mongo()
+    try:
+        _users.create_index("user_id", unique=True)
+        _jobs.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
+        _history.create_index([("user_id", 1), ("created_at", -1)])
+        _state.create_index("key", unique=True)
+        _state.update_one({"key": "bot_enabled"}, {"$setOnInsert": {"value": "1"}}, upsert=True)
+        _state.update_one({"key": "maintenance"}, {"$setOnInsert": {"value": "0"}}, upsert=True)
+        _client.admin.command("ping")
+    except PyMongoError as exc:
+        raise RuntimeError("MongoDB initialization failed") from exc
 
 
 def upsert_user(user_id: int, username: str | None):

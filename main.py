@@ -26,11 +26,22 @@ from bot.handlers import register_all_routers
 from bot.middlewares import CallbackAckMiddleware, ExceptionMiddleware, GateMiddleware, RateLimitMiddleware
 from bot.job_manager import manager
 
-db.init_db()
+db_ready = False
+try:
+    db.init_db()
+    db_ready = True
+except Exception:
+    log.exception(
+        "Database initialization failed. The server will continue startup, but bot commands may fail until DB connectivity is restored."
+    )
 log.info("Database backend: %s", "MongoDB" if cfg.MONGO_URI else "SQLite")
-recovered_jobs = db.recover_interrupted_jobs()
-if recovered_jobs:
-    log.warning("Marked %d interrupted job(s) after restart", recovered_jobs)
+if db_ready:
+    try:
+        recovered_jobs = db.recover_interrupted_jobs()
+        if recovered_jobs:
+            log.warning("Marked %d interrupted job(s) after restart", recovered_jobs)
+    except Exception:
+        log.exception("Failed to recover interrupted jobs after a successful DB init")
 
 if not cfg.BOT_TOKEN:
     raise RuntimeError(
