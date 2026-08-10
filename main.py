@@ -141,6 +141,17 @@ async def _set_bot_commands():
     await asyncio.gather(*(set_admin_commands(admin_id) for admin_id in cfg.ADMIN_IDS))
 
 
+async def _validate_bot_token():
+    try:
+        me = await bot.get_me()
+        log.info("Telegram bot authenticated as @%s (id=%s)", me.username or "<unknown>", me.id)
+    except Exception:
+        log.exception(
+            "BOT_TOKEN validation failed. Verify BOT_TOKEN and Telegram connectivity."
+        )
+        raise
+
+
 async def _configure_webhook_or_poll():
     """Runs at boot. Deliberately swallows its own exceptions - a Telegram API
     hiccup or bad token here must never crash the whole FastAPI process
@@ -180,13 +191,22 @@ async def _configure_webhook_or_poll():
         except Exception:
             log.exception("Failed to clear webhook before polling (continuing anyway)")
 
-    _polling_task = asyncio.create_task(dp.start_polling(bot))
+    async def _start_polling():
+        try:
+            log.info("Starting polling mode")
+            await dp.start_polling(bot)
+        except Exception:
+            log.exception("Polling failed. Check Telegram connectivity and BOT_TOKEN.")
+            raise
+
+    _polling_task = asyncio.create_task(_start_polling())
     log.info("Started polling mode")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Startup
+    await _validate_bot_token()
     await _configure_webhook_or_poll()
     await _set_bot_commands()
     # Start background job manager (download/upload workers)
