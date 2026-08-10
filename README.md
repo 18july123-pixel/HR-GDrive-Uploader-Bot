@@ -1,5 +1,11 @@
 # HR Gdrive Uploader Bot
 
+   _ _   _ ____   ____    _   _ ____  _   _  ____ _   _ _____
+ | | | | |  _ \ / ___|  | | | |  _ \| \ | |/ ___| | | | ____|
+ | | | | | | | | |  _   | | | | | | |  \| | |  _| | | |  _|
+ | |_| | | |_| | |_| |  | |_| | |_| | |\  | |_| | |_| | |___
+   \___/  |____/ \____|   \___/|____/|_| \_|\____|\___/|_____|
+
 A fast, reliable Telegram bot for uploading, cloning and managing Google Drive files for HR workflows.
 
 **Quick highlights**

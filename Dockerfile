@@ -25,6 +25,8 @@ COPY . .
 # Writable dirs for the SQLite DB and temp downloads (attach a Koyeb Volume
 # here if you want the DB to survive redeploys).
 RUN mkdir -p /app/data /app/downloads
+LABEL org.opencontainers.image.title="HR Gdrive Uploader Bot"
+LABEL org.opencontainers.image.description="Telegram bot to upload and manage files in Google Drive (HR-focused)"
 
 # Koyeb injects PORT at runtime; 8080 is just the local default/fallback.
 ENV PORT=8080 \
