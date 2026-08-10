@@ -112,9 +112,29 @@ Environment variables (simple):
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` — primary client (single-client fallback).
 - `GOOGLE_CLIENTS` — optional JSON array string of additional clients. Example:
 
-```json
-[{"name":"Client 01","client_id":"...","client_secret":"...","refresh_token":"...","enabled":true}]
+You can also configure clients using numbered environment variables (recommended
+for simple deployments). Provide at minimum `ID` and `SECRET` for each client;
+the `REFRESH_TOKEN` is optional unless your chosen auth flow requires it.
+
+Example:
+
+```bash
+export GOOGLE_MULTI_CLIENT_ENABLED=true
+
+export GOOGLE_CLIENT_1_ID=client_id_1
+export GOOGLE_CLIENT_1_SECRET=client_secret_1
+
+export GOOGLE_CLIENT_2_ID=client_id_2
+export GOOGLE_CLIENT_2_SECRET=client_secret_2
+export GOOGLE_CLIENT_2_REFRESH_TOKEN=refresh_token_2
+
+export GOOGLE_CLIENT_3_ID=client_id_3
+export GOOGLE_CLIENT_3_SECRET=client_secret_3
 ```
+
+All three clients above will be detected; client 1 and 3 are still valid even
+without a refresh token. The manager will decide the appropriate auth flow at
+runtime.
 
 Configuration priority: runtime/admin UI (if implemented) > environment variables > defaults in code. Secrets are never logged.
 
