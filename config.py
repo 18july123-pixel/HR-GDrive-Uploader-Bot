@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import shutil
 from dotenv import load_dotenv
@@ -7,6 +8,38 @@ load_dotenv()
 
 log = logging.getLogger("gdrive_bot.config")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _parse_google_client_configs(value: str) -> list[dict[str, str]]:
+    if not value:
+        return []
+    try:
+        data = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        log.warning("Invalid GOOGLE_CLIENTS JSON; ignoring multi-client config.")
+        return []
+    if not isinstance(data, list):
+        log.warning("GOOGLE_CLIENTS must be a JSON array; ignoring multi-client config.")
+        return []
+
+    parsed = []
+    for idx, item in enumerate(data, start=1):
+        if not isinstance(item, dict):
+            continue
+        client_id = str(item.get("client_id", "")).strip()
+        client_secret = str(item.get("client_secret", "")).strip()
+        refresh_token = str(item.get("refresh_token", "")).strip()
+        enabled = bool(item.get("enabled", True))
+        name = str(item.get("name") or f"client-{idx}")
+        if client_id and client_secret:
+            parsed.append({
+                "name": name,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "enabled": enabled,
+            })
+    return parsed
 
 
 def _detect_public_base_url() -> str:
@@ -61,13 +94,14 @@ class Config:
     GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN", "").strip()
 
     # Multi-client support: when true the manager will load multiple
-    # credential sets from `GOOGLE_CLIENTS` (JSON) or from the single
-    # `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (+ optional refresh token).
+    # credential sets from numbered env vars or from `GOOGLE_CLIENTS`.
+    # Only client_id and client_secret are required for auto-detected clients.
     GOOGLE_MULTI_CLIENT_ENABLED = os.getenv("GOOGLE_MULTI_CLIENT_ENABLED", "false").lower() == "true"
 
     # JSON array string for additional clients. Example:
     # '[{"name":"c1","client_id":"...","client_secret":"...","refresh_token":"...","enabled":true}]'
     GOOGLE_CLIENTS = os.getenv("GOOGLE_CLIENTS", "").strip()
+    GOOGLE_CLIENTS_CONFIGS = _parse_google_client_configs(GOOGLE_CLIENTS)
 
     GOOGLE_SCOPES = [
         "https://www.googleapis.com/auth/drive",
@@ -114,16 +148,16 @@ class Config:
     DEFAULT_SHARE_ROLE = os.getenv("DEFAULT_SHARE_ROLE", "reader")   # reader = Viewer
 
     # Limits
-    FREE_UPLOAD_LIMIT_GB = float(os.getenv("FREE_UPLOAD_LIMIT_GB", "2"))
+    FREE_UPLOAD_LIMIT_GB = float(os.getenv("FREE_UPLOAD_LIMIT_GB", "4"))
     PREMIUM_UPLOAD_LIMIT_GB = float(os.getenv("PREMIUM_UPLOAD_LIMIT_GB", "50"))
 
     # Duplicate detection
     DUPLICATE_CHECK_ENABLED = os.getenv("DUPLICATE_CHECK_ENABLED", "true").lower() == "true"
     # How many Drive-wide candidates to inspect per upload
-    DUPLICATE_SEARCH_LIMIT = int(os.getenv("DUPLICATE_SEARCH_LIMIT", "5"))
-    UPLOAD_PARALLELISM = max(1, int(os.getenv("UPLOAD_PARALLELISM", "2")))
+    DUPLICATE_SEARCH_LIMIT = int(os.getenv("DUPLICATE_SEARCH_LIMIT", "10"))
+    UPLOAD_PARALLELISM = max(1, int(os.getenv("UPLOAD_PARALLELISM", "5")))
     DOWNLOAD_WORKERS = int(os.getenv("DOWNLOAD_WORKERS", "2"))
-    DUPLICATE_SEARCH_LIMIT = int(os.getenv("DUPLICATE_SEARCH_LIMIT", "5"))
+    DUPLICATE_SEARCH_LIMIT = int(os.getenv("DUPLICATE_SEARCH_LIMIT", "10"))
 
 
 cfg = Config()

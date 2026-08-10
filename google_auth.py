@@ -26,6 +26,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.discovery import build
 
+from bot.google_client_manager import google_manager
 from config import cfg
 
 # Google's OAuth library refuses to run the flow over plain HTTP. That's
@@ -40,11 +41,11 @@ if cfg.OAUTH_REDIRECT_URI.startswith("http://") and (
     os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 
-def _client_config():
+def _client_config(client_id: str, client_secret: str) -> dict:
     return {
         "web": {
-            "client_id": cfg.GOOGLE_CLIENT_ID,
-            "client_secret": cfg.GOOGLE_CLIENT_SECRET,
+            "client_id": client_id,
+            "client_secret": client_secret,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [cfg.OAUTH_REDIRECT_URI],
@@ -52,9 +53,21 @@ def _client_config():
     }
 
 
+def _selected_client_config() -> tuple[str, str]:
+    if cfg.GOOGLE_CLIENT_ID and cfg.GOOGLE_CLIENT_SECRET:
+        return cfg.GOOGLE_CLIENT_ID, cfg.GOOGLE_CLIENT_SECRET
+    client = google_manager.get_available_client()
+    if client:
+        return client.client_id, client.client_secret
+    raise RuntimeError("No Google client configured for OAuth login")
+
+
 def build_auth_url(state: str) -> str:
+    client_id, client_secret = _selected_client_config()
     flow = Flow.from_client_config(
-        _client_config(), scopes=cfg.GOOGLE_SCOPES, redirect_uri=cfg.OAUTH_REDIRECT_URI
+        _client_config(client_id, client_secret),
+        scopes=cfg.GOOGLE_SCOPES,
+        redirect_uri=cfg.OAUTH_REDIRECT_URI,
     )
     auth_url, _ = flow.authorization_url(
         access_type="offline",
@@ -67,8 +80,11 @@ def build_auth_url(state: str) -> str:
 
 def exchange_code(code: str) -> dict:
     """Exchange an auth code for credentials, return as a JSON-serializable dict."""
+    client_id, client_secret = _selected_client_config()
     flow = Flow.from_client_config(
-        _client_config(), scopes=cfg.GOOGLE_SCOPES, redirect_uri=cfg.OAUTH_REDIRECT_URI
+        _client_config(client_id, client_secret),
+        scopes=cfg.GOOGLE_SCOPES,
+        redirect_uri=cfg.OAUTH_REDIRECT_URI,
     )
     flow.fetch_token(code=code)
     creds = flow.credentials

@@ -601,9 +601,11 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
             pass
 
 
-# Supports Drive files, Sheets, Docs, Slides, Forms, and published Forms
-# links, whose IDs use the /d/e/<id>/ URL shape.
-DRIVE_LINK_RE = re.compile(r"/(?:folders|d/e|file/d|d)/([a-zA-Z0-9_-]+)")
+# Supports Drive files, Sheets, Docs, Slides, Forms, Drawings, and published Forms
+# links, as well as standard Drive file and folder URLs.
+DRIVE_LINK_RE = re.compile(
+    r"/(?:folders|document/d|spreadsheets/d|presentation/d|forms/d|drawing/d|file/d|d/e|d)/([a-zA-Z0-9_-]+)"
+)
 DRIVE_ID_QUERY_RE = re.compile(r"[?&]id=([a-zA-Z0-9_-]+)")
 
 

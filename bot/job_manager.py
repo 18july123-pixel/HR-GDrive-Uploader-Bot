@@ -8,7 +8,7 @@ import database as db
 from config import cfg
 import drive_service
 from utils import safe_edit_text, html_link, human_bytes, format_duration
-from bot.keyboards import job_actions
+from bot.keyboards import job_actions, duplicate_confirm
 
 log = logging.getLogger("gdrive_bot.jobmgr")
 
@@ -146,7 +146,11 @@ class JobManager:
                     }
                     db.update_job(job.job_id, status="duplicate_pending")
                     if job.status_msg:
-                        await safe_edit_text(job.status_msg, "⚠️ Duplicate detected — please choose an action.", reply_markup=job_actions(job.job_id))
+                        await safe_edit_text(
+                            job.status_msg,
+                            "⚠️ Duplicate detected — please choose an action.",
+                            reply_markup=duplicate_confirm(str(job.job_id)),
+                        )
                     self.pending_q.task_done()
                     continue
 

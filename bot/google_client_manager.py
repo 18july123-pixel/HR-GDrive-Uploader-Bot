@@ -67,6 +67,7 @@ class GoogleClientManager:
             detected = []
             if cfg.GOOGLE_MULTI_CLIENT_ENABLED:
                 # scan environment for GOOGLE_CLIENT_<n>_ID keys
+                detected_by_num: dict[str, GoogleClientRecord] = {}
                 for k, v in os.environ.items():
                     if not k.startswith("GOOGLE_CLIENT_") or not k.endswith("_ID"):
                         continue
@@ -91,52 +92,40 @@ class GoogleClientManager:
                         refresh_token=refresh,
                         enabled=True,
                     )
-                    self._clients[record.client_id] = record
-                    self._order.append(record.client_id)
+                    detected_by_num[num] = record
                     detected.append(record)
 
+                for num in sorted(detected_by_num.keys(), key=lambda x: int(x) if x.isdigit() else x):
+                    record = detected_by_num[num]
+                    self._clients[record.client_id] = record
+                    self._order.append(record.client_id)
+
                 # fallback to JSON config if env detection found nothing
-                if not detected and cfg.GOOGLE_CLIENTS:
-                    try:
-                        data = json.loads(cfg.GOOGLE_CLIENTS)
-                        if isinstance(data, list):
-                            for idx, item in enumerate(data):
-                                name = item.get("name") or f"client-{idx+1}"
-                                record = GoogleClientRecord(
-                                    name=name,
-                                    client_id=item.get("client_id", ""),
-                                    client_secret=item.get("client_secret", ""),
-                                    refresh_token=item.get("refresh_token", ""),
-                                    enabled=bool(item.get("enabled", True)),
-                                )
-                                if record.client_id and record.client_secret:
-                                    # refresh_token is optional
-                                    self._clients[record.client_id] = record
-                                    self._order.append(record.client_id)
-                    except Exception:
-                        # Don't raise; keep manager empty so callers can fallback.
-                        pass
+                if not detected and cfg.GOOGLE_CLIENTS_CONFIGS:
+                    for item in cfg.GOOGLE_CLIENTS_CONFIGS:
+                        record = GoogleClientRecord(
+                            name=item["name"],
+                            client_id=item["client_id"],
+                            client_secret=item["client_secret"],
+                            refresh_token=item["refresh_token"],
+                            enabled=item["enabled"],
+                        )
+                        self._clients[record.client_id] = record
+                        self._order.append(record.client_id)
 
             else:
                 # If not multi-client, but a JSON array exists, still allow loading
-                if cfg.GOOGLE_CLIENTS:
-                    try:
-                        data = json.loads(cfg.GOOGLE_CLIENTS)
-                        if isinstance(data, list):
-                            for idx, item in enumerate(data):
-                                name = item.get("name") or f"client-{idx+1}"
-                                record = GoogleClientRecord(
-                                    name=name,
-                                    client_id=item.get("client_id", ""),
-                                    client_secret=item.get("client_secret", ""),
-                                    refresh_token=item.get("refresh_token", ""),
-                                    enabled=bool(item.get("enabled", True)),
-                                )
-                                if record.client_id and record.client_secret:
-                                    self._clients[record.client_id] = record
-                                    self._order.append(record.client_id)
-                    except Exception:
-                        pass
+                if cfg.GOOGLE_CLIENTS_CONFIGS:
+                    for item in cfg.GOOGLE_CLIENTS_CONFIGS:
+                        record = GoogleClientRecord(
+                            name=item["name"],
+                            client_id=item["client_id"],
+                            client_secret=item["client_secret"],
+                            refresh_token=item["refresh_token"],
+                            enabled=item["enabled"],
+                        )
+                        self._clients[record.client_id] = record
+                        self._order.append(record.client_id)
             # Fallback: single primary client from legacy envs
             if not self._clients and cfg.GOOGLE_CLIENT_ID and cfg.GOOGLE_CLIENT_SECRET:
                 record = GoogleClientRecord(
@@ -153,13 +142,17 @@ class GoogleClientManager:
             try:
                 total = len(self._order)
                 valid = sum(1 for c in self._clients.values() if c.client_id and c.client_secret)
-                logger.info("Google API clients | Multi-Client: %s | Detected: %d | Valid: %d",
+                logger.info("Google API Clients")
+                logger.info("Multi-Client: %s | Detected: %d | Valid: %d",
                             "ENABLED" if cfg.GOOGLE_MULTI_CLIENT_ENABLED else "DISABLED",
                             total, valid)
                 for cid in self._order:
                     rec = self._clients[cid]
-                    logger.info(" - %s | status=%s | enabled=%s | last_used=%s",
-                                rec.name, rec.status, rec.enabled,
+                    icon = "🟢" if rec.enabled else "🔴"
+                    refresh_note = "refresh=present" if rec.refresh_token else "refresh=optional"
+                    logger.info(" - %s %s | status=%s | enabled=%s | %s | last_used=%s",
+                                icon, rec.name, rec.status, rec.enabled,
+                                refresh_note,
                                 datetime.fromtimestamp(rec.last_used).isoformat() if rec.last_used else "-")
                 if total:
                     logger.info("Client pool ready")

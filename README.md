@@ -110,11 +110,15 @@ Environment variables (simple):
 
 - `GOOGLE_MULTI_CLIENT_ENABLED=false` — set to `true` to enable multi-client mode.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` — primary client (single-client fallback).
-- `GOOGLE_CLIENTS` — optional JSON array string of additional clients. Example:
+- `GOOGLE_CLIENTS` — optional JSON array string of additional clients.
 
-You can also configure clients using numbered environment variables (recommended
-for simple deployments). Provide at minimum `ID` and `SECRET` for each client;
-the `REFRESH_TOKEN` is optional unless your chosen auth flow requires it.
+When using auto-detected numbered clients, only `ID` and `SECRET` are required:
+
+- `GOOGLE_CLIENT_<N>_ID`
+- `GOOGLE_CLIENT_<N>_SECRET`
+
+The refresh token is optional and should only be provided when the selected
+Google authentication flow requires it.
 
 Example:
 
@@ -132,9 +136,12 @@ export GOOGLE_CLIENT_3_ID=client_id_3
 export GOOGLE_CLIENT_3_SECRET=client_secret_3
 ```
 
-All three clients above will be detected; client 1 and 3 are still valid even
-without a refresh token. The manager will decide the appropriate auth flow at
-runtime.
+All three clients above will be detected, including clients 1 and 3 without
+refresh tokens. Only clients missing `ID` or `SECRET` are ignored.
+
+The manager logs a safe startup summary without exposing secrets. The first
+line shows if multi-client mode is enabled, followed by detected/valid client
+counts and individual client status.
 
 Configuration priority: runtime/admin UI (if implemented) > environment variables > defaults in code. Secrets are never logged.
 
