@@ -82,9 +82,11 @@ def list_children(user_token: dict, folder_id: str = "root", folders_only=False,
             q += f" and mimeType != '{FOLDER_MIME}'"
         results = drive.files().list(
             q=q,
-            fields="files(id, name, mimeType, size, modifiedTime)",
+            fields="files(id, name, mimeType, size, modifiedTime, webViewLink, iconLink)",
             pageSize=100,
             orderBy="folder,name",
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
         ).execute(num_retries=3)
         return results.get("files", [])
     except (HttpError, RefreshError) as e:
@@ -221,6 +223,78 @@ def set_restricted(user_token: dict, file_id: str) -> dict:
 def get_link(user_token: dict, file_id: str) -> str:
     """Back-compat helper: applies the configured default share permission and returns the link."""
     return set_anyone_permission(user_token, file_id)["link"]
+
+
+def is_google_native(mime: str) -> bool:
+    return bool(mime and mime.startswith("application/vnd.google-apps."))
+
+
+def get_export_formats(mime: str) -> list:
+    """Return a list of (ext, label) tuples representing supported export formats.
+
+    Examples: ('pdf','PDF'), ('docx','DOCX')
+    """
+    if not mime:
+        return []
+    if mime == "application/vnd.google-apps.document":
+        return [("pdf", "PDF"), ("docx", "DOCX"), ("txt", "Plain Text"), ("html", "HTML")]
+    if mime == "application/vnd.google-apps.spreadsheet":
+        return [("xlsx", "XLSX"), ("pdf", "PDF"), ("csv", "CSV")]
+    if mime == "application/vnd.google-apps.presentation":
+        return [("pptx", "PPTX"), ("pdf", "PDF")]
+    # Forms are not exportable via Drive API; open only
+    return []
+
+
+def _export_mime_for_ext(ext: str) -> str | None:
+    mapping = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "txt": "text/plain",
+        "html": "text/html",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "csv": "text/csv",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+    return mapping.get(ext)
+
+
+def export_file_to_path(user_token: dict, file_id: str, ext: str, dest_path: str | None = None) -> str:
+    """Export a Google-native file to a local path and return that path.
+
+    `ext` is a short extension like 'pdf', 'docx', 'xlsx'. If `dest_path` is
+    None, a temporary file will be created in the downloads dir with a safe name.
+    """
+    import tempfile
+    from pathlib import Path
+
+    meta = get_file_meta(user_token, file_id)
+    mime = meta.get("mimeType")
+    export_mime = _export_mime_for_ext(ext)
+    if not export_mime:
+        raise RuntimeError(f"Unsupported export format: {ext}")
+
+    with _handle_drive_errors(f"exporting file '{file_id}' to {ext}"):
+        drive = get_drive(user_token)
+        req = drive.files().export(fileId=file_id, mimeType=export_mime)
+        data = req.execute(num_retries=3)
+
+    # data may be bytes or str
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+
+    if dest_path is None:
+        downloads_dir = DOWNLOAD_DIR
+        Path(downloads_dir).mkdir(parents=True, exist_ok=True)
+        suffix = f".{ext}"
+        fd, p = tempfile.mkstemp(suffix=suffix, prefix=f"export_{file_id}_", dir=downloads_dir)
+        Path(fd).close()
+        dest_path = p
+
+    with open(dest_path, "wb") as f:
+        f.write(data)
+
+    return dest_path
 
 
 # ---------------------------------------------------------------------------
@@ -453,8 +527,14 @@ def extract_id_from_link(link: str) -> str | None:
 def get_file_meta(user_token: dict, file_id: str) -> dict:
     with _handle_drive_errors(f"reading file metadata for '{file_id}'"):
         drive = get_drive(user_token)
+        # Request a comprehensive set of fields so callers can decide how to
+        # handle the file (native vs binary) without extra API calls.
+        fields = (
+            "id, name, mimeType, size, createdTime, modifiedTime, parents, "
+            "webViewLink, webContentLink, iconLink, thumbnailLink, capabilities, owners, description"
+        )
         return drive.files().get(
-            fileId=file_id, fields="id, name, mimeType, size, webViewLink, webContentLink"
+            fileId=file_id, fields=fields, supportsAllDrives=True
         ).execute(num_retries=3)
 
 

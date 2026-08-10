@@ -76,7 +76,10 @@ def file_actions(file_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✏️ Rename", callback_data=f"drive:rename:{file_id}"),
         InlineKeyboardButton(text="🔒 Sharing", callback_data=f"drive:share:{file_id}"),
     )
-    b.row(InlineKeyboardButton(text="🔗 Open Link", callback_data=f"drive:link:{file_id}"))
+    b.row(
+        InlineKeyboardButton(text="🔗 Open Link", callback_data=f"drive:link:{file_id}"),
+        InlineKeyboardButton(text="📥 Export", callback_data=f"drive:export:{file_id}"),
+    )
     b.row(InlineKeyboardButton(text="🗑️ Delete", callback_data=f"drive:delete_confirm:{file_id}"))
     return b.as_markup()
 

@@ -4,6 +4,7 @@ import json
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
+from aiogram.types import InputFile
 from aiogram.fsm.context import FSMContext
 
 import database as db
@@ -86,6 +87,49 @@ async def cb_drive_open(call: CallbackQuery, state: FSMContext):
             parse_mode="HTML",
             reply_markup=file_actions(target_id),
         )
+    await safe_answer(call)
+
+
+@router.callback_query(F.data.startswith("drive:export:"))
+async def cb_drive_export(call: CallbackQuery, state: FSMContext):
+    file_id = call.data.split(":")[-1]
+    token = db.get_google_token(call.from_user.id)
+    if not token:
+        await safe_answer(call, "☁️ Connect your Google Drive first with /login.", show_alert=True)
+        return
+    meta = drive_service.get_file_meta(token, file_id)
+    mime = meta.get("mimeType")
+    # Determine available export formats
+    formats = drive_service.get_export_formats(mime)
+    if not formats:
+        await call.message.answer("This file type cannot be exported. You can open it instead.")
+        await safe_answer(call)
+        return
+    # Build inline keyboard of formats
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    b = InlineKeyboardBuilder()
+    for fmt in formats:
+        b.row(InlineKeyboardButton(text=fmt[1], callback_data=f"drive:doexport:{fmt[0]}:{file_id}"))
+    b.row(InlineKeyboardButton(text="🔗 Open Instead", callback_data=f"drive:link:{file_id}"))
+    await call.message.answer(f"Export '{meta.get('name')}' as:", reply_markup=b.as_markup())
+    await safe_answer(call)
+
+
+@router.callback_query(F.data.startswith("drive:doexport:"))
+async def cb_drive_doexport(call: CallbackQuery):
+    _, fmt, file_id = call.data.split(":", 2)
+    token = db.get_google_token(call.from_user.id)
+    if not token:
+        await safe_answer(call, "☁️ Connect your Google Drive first with /login.", show_alert=True)
+        return
+    meta = drive_service.get_file_meta(token, file_id)
+    await call.message.answer(f"🔄 Exporting {meta.get('name')} as {fmt}...")
+    try:
+        path = await asyncio.to_thread(drive_service.export_file_to_path, token, file_id, fmt)
+        await call.message.answer_document(InputFile(path), caption=f"{meta.get('name')}.{fmt}")
+    except Exception as e:
+        await call.message.answer(f"⚠️ Export failed: {e}")
     await safe_answer(call)
 
 
