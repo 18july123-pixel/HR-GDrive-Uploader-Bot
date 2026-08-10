@@ -486,7 +486,7 @@ async def cb_duplicate_decision(call: CallbackQuery, state: FSMContext):
         # final result) - don't pre-edit here, Telegram rejects a no-op edit.
         await _finalize_upload(
             job_id, call.message, token, local_path,
-            pending["filename"], pending["size"], pending["folder_id"], pending["user_id"],
+            pending["filename"], pending["size"], pending["folder_id"], pending["destination_path"], pending["user_id"],
         )
         return
 
