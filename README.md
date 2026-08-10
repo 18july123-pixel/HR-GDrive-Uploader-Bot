@@ -100,6 +100,32 @@ If you want, I can add a GitHub Actions workflow to build and push the image aut
 - `DOWNLOAD_DIR` — download folder (default `/app/downloads`).
 - `UPLOAD_PARALLELISM` / `DOWNLOAD_WORKERS` — tune worker counts.
 
+**Google multi-client configuration (optional)**
+
+This bot can run in single-client mode (default) or multi-client mode where a pool
+of OAuth credential sets are used and the bot automatically fails over between
+clients on quota/rate errors.
+
+Environment variables (simple):
+
+- `GOOGLE_MULTI_CLIENT_ENABLED=false` — set to `true` to enable multi-client mode.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` — primary client (single-client fallback).
+- `GOOGLE_CLIENTS` — optional JSON array string of additional clients. Example:
+
+```json
+[{"name":"Client 01","client_id":"...","client_secret":"...","refresh_token":"...","enabled":true}]
+```
+
+Configuration priority: runtime/admin UI (if implemented) > environment variables > defaults in code. Secrets are never logged.
+
+The bot includes a `GoogleClientManager` (`bot/google_client_manager.py`) which exposes:
+
+- `google_manager.get_available_client()` — pick a healthy client record
+- `google_manager.get_credentials_for(record)` — get `google.oauth2.credentials.Credentials`
+- `google_manager.execute(operation, ...)` — attempt an operation with automatic failover
+
+Use the manager to centralize credential selection for all Google API operations.
+
 **Usage — core commands**
 - `/login` — connect Google Drive
 - `/upload` — send files to upload
