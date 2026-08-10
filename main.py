@@ -24,6 +24,7 @@ import google_auth
 from config import cfg, _detect_public_base_url
 from bot.handlers import register_all_routers
 from bot.middlewares import CallbackAckMiddleware, ExceptionMiddleware, GateMiddleware, RateLimitMiddleware
+from bot.job_manager import manager
 
 db.init_db()
 log.info("Database backend: %s", "MongoDB" if cfg.MONGO_URI else "SQLite")
@@ -177,8 +178,17 @@ async def lifespan(_app: FastAPI):
     # Startup
     await _configure_webhook_or_poll()
     await _set_bot_commands()
+    # Start background job manager (download/upload workers)
+    try:
+        await manager.start(bot)
+    except Exception:
+        log.exception("Failed to start JobManager")
     yield
     # Shutdown
+    try:
+        await manager.stop()
+    except Exception:
+        log.exception("Error stopping JobManager")
     if _polling_task and not _polling_task.done():
         _polling_task.cancel()
     try:

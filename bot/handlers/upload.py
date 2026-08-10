@@ -18,6 +18,7 @@ from config import cfg
 from utils import format_duration, html_link, human_bytes, progress_bar, safe_answer, safe_edit_text, user_message
 from bot.states import UploadStates
 from bot.keyboards import duplicate_confirm
+from bot.job_manager import manager, Job
 
 log = logging.getLogger("gdrive_bot.upload")
 router = Router()
@@ -379,70 +380,22 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
         ),
         parse_mode="HTML",
     )
-
+    # Defer download/upload work to the central JobManager so workers can
+    # run in parallel and persist job metadata.
     local_path = os.path.join(cfg.DOWNLOAD_DIR, f"{message.from_user.id}_{job_id}_{safe_filename}")
-    queue = _ensure_upload_worker(message.from_user.id)
-    position = queue.qsize()
-    await queue.put({
-        "job_id": job_id,
-        "status_msg": status_msg,
-        "token": token,
-        "local_path": local_path,
-        "filename": filename,
-        "size": size,
-        "folder_id": folder_id,
-        "destination_path": destination_path,
-        "user_id": message.from_user.id,
-    })
-    if position:
-        await status_msg.edit_text(
-            f"📥 Queued: <b>{html.escape(filename)}</b>\n"
-            f"Position: {position + 1}\n💾 {human_bytes(size)}",
-            parse_mode="HTML",
-        )
-    download_started = time.monotonic()
-
-    async def show_download_progress():
-        while True:
-            downloaded = os.path.getsize(local_path) if os.path.exists(local_path) else 0
-            elapsed = time.monotonic() - download_started
-            await safe_edit_text(
-                status_msg,
-                _make_upload_card(
-                    filename,
-                    done=downloaded,
-                    total=size,
-                    destination=destination_path,
-                    stage="Downloading from Telegram",
-                    status_text="Downloading...",
-                    elapsed=elapsed,
-                ),
-                parse_mode="HTML",
-            )
-            await asyncio.sleep(1)
-
-    download_task = asyncio.create_task(show_download_progress())
-    try:
-        file_info = await bot.get_file(tg_file.file_id)
-        await bot.download_file(file_info.file_path, destination=local_path)
-    except Exception as e:
-        db.update_job(job_id, status="error", error=str(e))
-        await status_msg.edit_text(f"❌ Download failed: {html.escape(str(e))}", parse_mode="HTML")
-        if os.path.exists(local_path):
-            os.remove(local_path)
-        return
-    finally:
-        download_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await download_task
-
-    queue = _ensure_upload_worker(message.from_user.id)
-    position = queue.qsize()
-    await queue.put({
-        "job_id": job_id, "status_msg": status_msg, "token": token,
-        "local_path": local_path, "filename": filename, "size": size,
-        "folder_id": folder_id, "user_id": message.from_user.id,
-    })
+    job = Job(
+        job_id=job_id,
+        user_id=message.from_user.id,
+        filename=filename,
+        size=size,
+        folder_id=folder_id,
+        destination_path=destination_path,
+        tg_file_id=tg_file.file_id,
+        local_path=local_path,
+        status_msg=status_msg,
+        priority=10,
+    )
+    position = manager.enqueue(job)
     if position:
         await status_msg.edit_text(
             f"📥 Queued: <b>{html.escape(filename)}</b>\n"
