@@ -57,6 +57,17 @@ class Config:
     # Google OAuth
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    # Optional long-lived refresh token for a non-interactive primary client
+    GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN", "").strip()
+
+    # Multi-client support: when true the manager will load multiple
+    # credential sets from `GOOGLE_CLIENTS` (JSON) or from the single
+    # `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (+ optional refresh token).
+    GOOGLE_MULTI_CLIENT_ENABLED = os.getenv("GOOGLE_MULTI_CLIENT_ENABLED", "false").lower() == "true"
+
+    # JSON array string for additional clients. Example:
+    # '[{"name":"c1","client_id":"...","client_secret":"...","refresh_token":"...","enabled":true}]'
+    GOOGLE_CLIENTS = os.getenv("GOOGLE_CLIENTS", "").strip()
 
     GOOGLE_SCOPES = [
         "https://www.googleapis.com/auth/drive",
