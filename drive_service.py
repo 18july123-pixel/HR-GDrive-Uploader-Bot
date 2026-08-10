@@ -10,6 +10,17 @@ from google_auth import credentials_from_dict
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
+NATIVE_FILE_VIEW_URLS = {
+    "application/vnd.google-apps.document": "https://docs.google.com/document/d/{}/edit",
+    "application/vnd.google-apps.spreadsheet": "https://docs.google.com/spreadsheets/d/{}/edit",
+    "application/vnd.google-apps.presentation": "https://docs.google.com/presentation/d/{}/edit",
+    "application/vnd.google-apps.form": "https://docs.google.com/forms/d/{}/edit",
+    "application/vnd.google-apps.drawing": "https://docs.google.com/drawings/d/{}/edit",
+    "application/vnd.google-apps.script": "https://script.google.com/d/{}/edit",
+    "application/vnd.google-apps.jam": "https://jamboard.google.com/d/{}",
+    "application/vnd.google-apps.folder": "https://drive.google.com/drive/folders/{}",
+}
+
 
 @contextmanager
 def _handle_drive_errors(operation: str):
@@ -154,13 +165,8 @@ def get_file_link(user_token: dict, file_id: str) -> str:
         if link:
             return link
 
-        native_links = {
-            "application/vnd.google-apps.spreadsheet": "https://docs.google.com/spreadsheets/d/{}/edit",
-            "application/vnd.google-apps.document": "https://docs.google.com/document/d/{}/edit",
-            "application/vnd.google-apps.presentation": "https://docs.google.com/presentation/d/{}/edit",
-            "application/vnd.google-apps.form": "https://docs.google.com/forms/d/{}/edit",
-        }
-        template = native_links.get(f.get("mimeType"))
+        mime_type = f.get("mimeType")
+        template = NATIVE_FILE_VIEW_URLS.get(mime_type)
         if template:
             return template.format(file_id)
         return f"https://drive.google.com/open?id={file_id}"
@@ -334,26 +340,46 @@ def find_duplicate_in_folder(user_token: dict, parent_id: str, name: str,
     return None
 
 
+def _is_retryable_upload_error(exc: Exception) -> bool:
+    if isinstance(exc, RefreshError):
+        return True
+    if isinstance(exc, HttpError):
+        status = getattr(exc, 'status_code', None) or getattr(exc, 'resp', None) and getattr(exc.resp, 'status', None)
+        if status in {429, 500, 502, 503, 504}:
+            return True
+        message = str(exc).lower()
+        return 'timeout' in message or 'timed out' in message or 'connection aborted' in message
+    return False
+
+
 def upload_local_file(user_token: dict, local_path: str, filename: str, parent_id: str,
-                       progress_cb=None) -> dict:
+                       progress_cb=None, retry_cb=None, max_attempts: int = 3,
+                       backoff_seconds: float = 2.0) -> dict:
     # FIX #5: wrap the resumable upload loop so HttpErrors surface clearly
-    try:
-        drive = get_drive(user_token)
-        media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
-        request = drive.files().create(
-            body={"name": filename, "parents": [parent_id]},
-            media_body=media,
-            fields="id, name, size, webViewLink",
-        )
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-            if status and progress_cb:
-                progress_cb(status.progress())
-        return response
-    except (HttpError, RefreshError) as e:
-        reason = getattr(e, "reason", None) or str(e)
-        raise RuntimeError(f"Drive API error uploading '{filename}': {reason}") from e
+    attempt = 1
+    while True:
+        try:
+            drive = get_drive(user_token)
+            media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
+            request = drive.files().create(
+                body={"name": filename, "parents": [parent_id]},
+                media_body=media,
+                fields="id, name, size, webViewLink",
+            )
+            response = None
+            while response is None:
+                status, response = request.next_chunk()
+                if status and progress_cb:
+                    progress_cb(status.progress())
+            return response
+        except (HttpError, RefreshError) as e:
+            reason = getattr(e, "reason", None) or str(e)
+            if attempt >= max_attempts or not _is_retryable_upload_error(e):
+                raise RuntimeError(f"Drive API error uploading '{filename}': {reason}") from e
+            attempt += 1
+            if retry_cb:
+                retry_cb(attempt, max_attempts, reason)
+            time.sleep(backoff_seconds * (2 ** (attempt - 2)))
 
 
 # Supports Drive files, Sheets, Docs, Slides, Forms, and published Forms

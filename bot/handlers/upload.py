@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import time
 import html
 import asyncio
@@ -67,6 +68,47 @@ async def _ensure_default_folder(user: dict, token: dict) -> str:
     return await asyncio.to_thread(drive_service.ensure_default_folder, user, token)
 
 
+def _make_upload_card(
+    filename: str,
+    done: int,
+    total: int,
+    destination: str,
+    stage: str,
+    status_text: str,
+    elapsed: float | None = None,
+    retry_info: str | None = None,
+) -> str:
+    percent = int(done / total * 100) if total else 0
+    lines = [
+        "📤 Uploading File",
+        "",
+        f"📄 {html.escape(filename)}",
+        "",
+        "━━━━━━━━━━━━━━━",
+        "",
+        f"{progress_bar(percent, 100, done_bytes=done, total_bytes=total)}",
+        "",
+        f"📦 {human_bytes(done)} / {human_bytes(total)}",
+    ]
+
+    if elapsed and elapsed > 0:
+        speed_bps = done / elapsed
+        lines.append(f"⚡ {human_bytes(int(speed_bps))}/s")
+        if total and done < total:
+            eta_seconds = int((total - done) / speed_bps) if speed_bps > 0 else 0
+            lines.append(f"⏱ ETA: {format_duration(eta_seconds)}")
+
+    if destination:
+        lines.append(f"📁 Destination: {destination}")
+
+    lines.extend(["", f"🔄 Status: {status_text}"])
+    stage_icon = "📥" if "download" in stage.lower() else "⬆️" if "upload" in stage.lower() else "🔄"
+    lines.append(f"{stage_icon} {stage}")
+    if retry_info:
+        lines.append(f"🔁 {retry_info}")
+    return "\n".join(lines)
+
+
 @router.message(Command("upload"))
 async def cmd_upload(message: Message, state: FSMContext):
     user = await _ensure_connected(message)
@@ -119,19 +161,29 @@ def _duplicate_warning_text(filename: str, size: int, candidate: dict, extra_cou
 
 
 async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_path: str,
-                            filename: str, size: int, folder_id: str, user_id: int):
+                            filename: str, size: int, folder_id: str, destination_path: str,
+                            user_id: int):
     """Actually uploads local_path to Drive, updates the job/stats, and reports back."""
     try:
         await status_msg.edit_text(
-            f"⬆️ Uploading {html.escape(filename)} to Drive...\n"
-            f"{progress_bar(0, 100, total_bytes=size)}",
+            _make_upload_card(
+                filename,
+                done=0,
+                total=size,
+                destination=destination_path,
+                stage="Uploading to Drive",
+                status_text="Uploading...",
+                elapsed=0,
+            ),
             parse_mode="HTML",
         )
         loop = asyncio.get_running_loop()
         last_update = [0.0]
         started_at = time.monotonic()
+        last_progress = {"pct": 0.0}
 
         def progress(pct):
+            last_progress["pct"] = pct
             db.update_job(job_id, progress=pct * 100)
             now = time.monotonic()
             if pct >= 1 or now - last_update[0] < 1.5:
@@ -139,15 +191,52 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
             last_update[0] = now
             update = safe_edit_text(
                 status_msg,
-                f"⬆️ Uploading {html.escape(filename)} to Drive...\n"
-                f"{progress_bar(int(pct * 100), 100, done_bytes=pct * size, total_bytes=size)}\n"
-                f"Elapsed: {format_duration(now - started_at)}",
+                _make_upload_card(
+                    filename,
+                    done=int(pct * size),
+                    total=size,
+                    destination=destination_path,
+                    stage="Uploading to Drive",
+                    status_text="Uploading...",
+                    elapsed=now - started_at,
+                ),
                 parse_mode="HTML",
             )
             asyncio.run_coroutine_threadsafe(update, loop)
 
+        def retry(attempt: int, max_attempts: int, reason: str):
+            if attempt <= max_attempts:
+                done_bytes = int(last_progress["pct"] * size)
+                db.update_job(job_id, status="running", error=f"Retry {attempt}/{max_attempts}: {reason}")
+                asyncio.run_coroutine_threadsafe(
+                    safe_edit_text(
+                        status_msg,
+                        _make_upload_card(
+                            filename,
+                            done=done_bytes,
+                            total=size,
+                            destination=destination_path,
+                            stage="Retrying upload",
+                            status_text=f"Retry {attempt}/{max_attempts}",
+                            elapsed=time.monotonic() - started_at,
+                            retry_info=reason,
+                        ),
+                        parse_mode="HTML",
+                    ),
+                    loop,
+                )
+
         def do_upload():
-            return drive_service.upload_local_file(token, local_path, filename, folder_id, progress_cb=progress)
+            return drive_service.upload_local_file(
+                token,
+                local_path,
+                filename,
+                folder_id,
+                progress_cb=progress,
+                retry_cb=retry,
+                max_attempts=cfg.UPLOAD_RETRY_LIMIT,
+                backoff_seconds=cfg.UPLOAD_RETRY_BACKOFF_SECONDS,
+            )
 
         result = await asyncio.to_thread(do_upload)
 
@@ -184,6 +273,7 @@ async def _process_queued_upload(item: dict):
     filename = item["filename"]
     size = item["size"]
     folder_id = item["folder_id"]
+    destination_path = item["destination_path"]
     user_id = item["user_id"]
 
     if cfg.DUPLICATE_CHECK_ENABLED:
@@ -218,7 +308,7 @@ async def _process_queued_upload(item: dict):
             )
             return
 
-    await _finalize_upload(job_id, status_msg, token, local_path, filename, size, folder_id, user_id)
+    await _finalize_upload(job_id, status_msg, token, local_path, filename, size, folder_id, destination_path, user_id)
 
 
 async def _upload_worker(user_id: int):
@@ -265,27 +355,68 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
         photo = message.photo[-1]
         tg_file, filename, size = photo, f"photo_{int(time.time())}.jpg", photo.file_size or 0
 
+    safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+    safe_filename = safe_filename[:180] if len(safe_filename) > 180 else safe_filename
+
     folder_id = await _ensure_default_folder(user, token)
+    try:
+        destination_path = await asyncio.to_thread(drive_service.get_folder_path, token, folder_id)
+    except Exception:
+        destination_path = folder_id
+
     job_id = db.create_job(message.from_user.id, "upload", filename, folder_id)
     db.update_job(job_id, status="queued")
 
     status_msg = await message.answer(
-        f"⬇️ Downloading <b>{html.escape(filename)}</b>...",
+        _make_upload_card(
+            filename,
+            done=0,
+            total=size,
+            destination=destination_path,
+            stage="Downloading from Telegram",
+            status_text="Downloading...",
+            elapsed=0,
+        ),
         parse_mode="HTML",
     )
 
-    local_path = os.path.join(cfg.DOWNLOAD_DIR, f"{message.from_user.id}_{job_id}_{filename}")
+    local_path = os.path.join(cfg.DOWNLOAD_DIR, f"{message.from_user.id}_{job_id}_{safe_filename}")
+    queue = _ensure_upload_worker(message.from_user.id)
+    position = queue.qsize()
+    await queue.put({
+        "job_id": job_id,
+        "status_msg": status_msg,
+        "token": token,
+        "local_path": local_path,
+        "filename": filename,
+        "size": size,
+        "folder_id": folder_id,
+        "destination_path": destination_path,
+        "user_id": message.from_user.id,
+    })
+    if position:
+        await status_msg.edit_text(
+            f"📥 Queued: <b>{html.escape(filename)}</b>\n"
+            f"Position: {position + 1}\n💾 {human_bytes(size)}",
+            parse_mode="HTML",
+        )
     download_started = time.monotonic()
 
     async def show_download_progress():
         while True:
             downloaded = os.path.getsize(local_path) if os.path.exists(local_path) else 0
-            percent = (downloaded / size * 100) if size else 0
+            elapsed = time.monotonic() - download_started
             await safe_edit_text(
                 status_msg,
-                f"⬇️ Downloading <b>{html.escape(filename)}</b>...\n"
-                f"{progress_bar(int(percent), 100, done_bytes=downloaded, total_bytes=size)}\n"
-                f"Elapsed: {format_duration(time.monotonic() - download_started)}",
+                _make_upload_card(
+                    filename,
+                    done=downloaded,
+                    total=size,
+                    destination=destination_path,
+                    stage="Downloading from Telegram",
+                    status_text="Downloading...",
+                    elapsed=elapsed,
+                ),
                 parse_mode="HTML",
             )
             await asyncio.sleep(1)

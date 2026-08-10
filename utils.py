@@ -22,11 +22,11 @@ def user_message(call):
     Telegram to reject a later send with "Forbidden: bot can't send messages
     to bot".
 
-    This returns a copy of `call.message` with `.from_user` corrected to
-    `call.from_user` (the real, clicking user), so it's safe to pass into
-    those handlers.
+    This returns a shallow copy of `call.message` with `.from_user` corrected
+    to `call.from_user` (the real, clicking user), so it's safe to pass into
+    those handlers without deep-copying any underlying Cython-backed objects.
     """
-    return call.message.model_copy(deep=True, update={"from_user": call.from_user})
+    return call.message.model_copy(deep=False, update={"from_user": call.from_user})
 
 
 def human_bytes(n: int | float | None) -> str:
