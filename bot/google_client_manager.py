@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Any
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from ..config import cfg
 
@@ -221,6 +222,34 @@ class GoogleClientManager:
             else:
                 rec.status = "ERROR"
 
+    def add_client(self, name: str, client_id: str, client_secret: str, refresh_token: str = "", enabled: bool = True) -> GoogleClientRecord:
+        with self._lock:
+            rec = GoogleClientRecord(name=name, client_id=client_id, client_secret=client_secret, refresh_token=refresh_token, enabled=enabled)
+            self._clients[client_id] = rec
+            self._order.append(client_id)
+            return rec
+
+    def edit_client(self, client_id: str, **kwargs) -> Optional[GoogleClientRecord]:
+        with self._lock:
+            rec = self._clients.get(client_id)
+            if not rec:
+                return None
+            for k, v in kwargs.items():
+                if hasattr(rec, k) and k != 'client_id':
+                    setattr(rec, k, v)
+            return rec
+
+    def remove_client(self, client_id: str) -> bool:
+        with self._lock:
+            if client_id in self._clients:
+                del self._clients[client_id]
+                try:
+                    self._order.remove(client_id)
+                except ValueError:
+                    pass
+                return True
+            return False
+
     def set_enabled(self, client_id: str, enabled: bool) -> None:
         with self._lock:
             rec = self._clients.get(client_id)
@@ -266,12 +295,33 @@ class GoogleClientManager:
                 return result
             except Exception as exc:  # broad catch: caller should raise informative errors
                 last_exc = exc
-                msg = str(exc).lower()
-                if "quota" in msg or "quota_exceeded" in msg:
-                    self.mark_error(client.client_id, "quota")
-                elif "rate" in msg or "rate_limit" in msg or "user rate" in msg:
-                    self.mark_error(client.client_id, "rate_limit")
-                else:
+                # Prefer structured HttpError parsing for accurate reasons
+                try:
+                    if isinstance(exc, HttpError):
+                        resp = exc.resp
+                        status = getattr(resp, 'status', None)
+                        content = exc.content
+                        reason = None
+                        try:
+                            parsed = json.loads(content)
+                            reason = parsed.get('error', {}).get('errors', [{}])[0].get('reason')
+                        except Exception:
+                            reason = None
+                        if status and int(status) in (429, 503):
+                            self.mark_error(client.client_id, 'rate_limit')
+                        elif reason and 'quota' in reason.lower():
+                            self.mark_error(client.client_id, 'quota')
+                        else:
+                            self.mark_error(client.client_id, 'error')
+                    else:
+                        msg = str(exc).lower()
+                        if "quota" in msg or "quota_exceeded" in msg:
+                            self.mark_error(client.client_id, "quota")
+                        elif "rate" in msg or "rate_limit" in msg or "user rate" in msg:
+                            self.mark_error(client.client_id, "rate_limit")
+                        else:
+                            self.mark_error(client.client_id, "error")
+                except Exception:
                     self.mark_error(client.client_id, "error")
                 tried.append(client.client_id)
                 # try next client
