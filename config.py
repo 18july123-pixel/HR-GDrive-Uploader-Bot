@@ -157,7 +157,8 @@ class Config:
     DUPLICATE_SEARCH_LIMIT = int(os.getenv("DUPLICATE_SEARCH_LIMIT", "10"))
     UPLOAD_PARALLELISM = max(1, int(os.getenv("UPLOAD_PARALLELISM", "5")))
     DOWNLOAD_WORKERS = int(os.getenv("DOWNLOAD_WORKERS", "2"))
-    DUPLICATE_SEARCH_LIMIT = int(os.getenv("DUPLICATE_SEARCH_LIMIT", "10"))
+    UPLOAD_RETRY_LIMIT = int(os.getenv("UPLOAD_RETRY_LIMIT", "3"))
+    UPLOAD_RETRY_BACKOFF_SECONDS = float(os.getenv("UPLOAD_RETRY_BACKOFF_SECONDS", "2"))
 
 
 cfg = Config()

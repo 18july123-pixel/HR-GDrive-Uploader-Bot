@@ -62,10 +62,54 @@ class JobManager:
 
     def enqueue(self, job: Job) -> int:
         # priority queue uses (priority, created_at, job_id)
+        job.status = "queued"
         self.jobs[job.job_id] = job
         self.pending_q.put_nowait((job.priority, job.created_at, job.job_id))
-        # return position roughly (not exact under concurrency)
         return self._queue_position(job.job_id)
+
+    def _active_user_jobs(self, user_id: int) -> list[Job]:
+        return sorted(
+            [
+                job
+                for job in self.jobs.values()
+                if job.user_id == user_id
+                and job.status
+                in {"pending", "queued", "downloading", "uploading", "duplicate_pending", "running"}
+            ],
+            key=lambda job: job.created_at,
+        )
+
+    def _queue_position(self, job_id: int) -> int:
+        try:
+            job = self.jobs.get(job_id)
+            if not job:
+                return 0
+            active_jobs = self._active_user_jobs(job.user_id)
+            for index, active in enumerate(active_jobs):
+                if active.job_id == job_id:
+                    return index
+        except Exception:
+            pass
+        return 0
+
+    def queue_summary(self, job_id: int) -> tuple[int, int, int, int, int] | None:
+        job = self.jobs.get(job_id)
+        if not job:
+            return None
+        active_jobs = self._active_user_jobs(job.user_id)
+        total = len(active_jobs)
+        if total <= 1:
+            return None
+        position = 0
+        bytes_total = 0
+        bytes_done = 0
+        for index, active in enumerate(active_jobs):
+            if active.job_id == job_id:
+                position = index
+            bytes_total += active.size or 0
+            bytes_done += int((active.progress or 0) * (active.size or 0))
+        remaining = total - position - 1
+        return position + 1, total, remaining, bytes_done, bytes_total
 
     def cancel(self, job_id: int) -> bool:
         job = self.jobs.get(job_id)

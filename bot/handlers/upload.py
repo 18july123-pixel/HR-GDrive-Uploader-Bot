@@ -80,6 +80,10 @@ def _make_upload_card(
     status_text: str,
     elapsed: float | None = None,
     retry_info: str | None = None,
+    queue_position: int | None = None,
+    queue_total: int | None = None,
+    queue_bytes_done: int | None = None,
+    queue_bytes_total: int | None = None,
 ) -> str:
     percent = int(done / total * 100) if total else 0
     lines = [
@@ -93,6 +97,18 @@ def _make_upload_card(
         "",
         f"📦 {human_bytes(done)} / {human_bytes(total)}",
     ]
+    if queue_total is not None and queue_total > 1 and queue_position is not None:
+        lines.extend([
+            "",
+            f"📌 Queue: {queue_position}/{queue_total}",
+            f"⏳ Remaining: {queue_total - queue_position}",
+        ])
+        if queue_bytes_total is not None and queue_bytes_total > 0:
+            queue_pct = int(queue_bytes_done / queue_bytes_total * 100) if queue_bytes_total else 0
+            lines.extend([
+                "",
+                f"📊 Queue progress: {progress_bar(queue_pct, 100, width=10, done_bytes=queue_bytes_done, total_bytes=queue_bytes_total)}",
+            ])
 
     if elapsed and elapsed > 0:
         speed_bps = done / elapsed
@@ -185,6 +201,10 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
         started_at = time.monotonic()
         last_progress = {"pct": 0.0}
 
+        def _current_queue_context() -> tuple[int, int, int, int, int] | tuple[None, None, None, None, None]:
+            summary = manager.queue_summary(job_id)
+            return (summary[0], summary[1], summary[2], summary[3], summary[4]) if summary else (None, None, None, None, None)
+
         def progress(pct):
             last_progress["pct"] = pct
             db.update_job(job_id, progress=pct * 100)
@@ -192,6 +212,7 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
             if pct >= 1 or now - last_update[0] < 1.5:
                 return
             last_update[0] = now
+            position, total, remaining, queue_bytes_done, queue_bytes_total = _current_queue_context()
             update = safe_edit_text(
                 status_msg,
                 _make_upload_card(
@@ -202,6 +223,10 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
                     stage="Uploading to Drive",
                     status_text="Uploading...",
                     elapsed=now - started_at,
+                    queue_position=position,
+                    queue_total=total,
+                    queue_bytes_done=queue_bytes_done,
+                    queue_bytes_total=queue_bytes_total,
                 ),
                 parse_mode="HTML",
                 reply_markup=job_actions(job_id),
@@ -212,6 +237,7 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
             if attempt <= max_attempts:
                 done_bytes = int(last_progress["pct"] * size)
                 db.update_job(job_id, status="running", error=f"Retry {attempt}/{max_attempts}: {reason}")
+                position, total, remaining, queue_bytes_done, queue_bytes_total = _current_queue_context()
                 asyncio.run_coroutine_threadsafe(
                     safe_edit_text(
                         status_msg,
@@ -224,6 +250,10 @@ async def _finalize_upload(job_id: int, status_msg: Message, token: dict, local_
                             status_text=f"Retry {attempt}/{max_attempts}",
                             elapsed=time.monotonic() - started_at,
                             retry_info=reason,
+                            queue_position=position,
+                            queue_total=total,
+                            queue_bytes_done=queue_bytes_done,
+                            queue_bytes_total=queue_bytes_total,
                         ),
                         parse_mode="HTML",
                         reply_markup=job_actions(job_id),
@@ -402,11 +432,29 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
         priority=10,
     )
     position = manager.enqueue(job)
-    if position:
+    queue_summary = manager.queue_summary(job_id)
+    if queue_summary:
+        position, total, remaining, _, _ = queue_summary
+        await status_msg.edit_text(
+            _make_upload_card(
+                filename,
+                done=0,
+                total=size,
+                destination=destination_path,
+                stage="Queued for upload",
+                status_text="Waiting in queue",
+                queue_position=position,
+                queue_total=total,
+            ),
+            parse_mode="HTML",
+            reply_markup=job_actions(job_id),
+        )
+    elif position:
         await status_msg.edit_text(
             f"📥 Queued: <b>{html.escape(filename)}</b>\n"
             f"Position: {position + 1}\n💾 {human_bytes(size)}",
             parse_mode="HTML",
+            reply_markup=job_actions(job_id),
         )
 
 
