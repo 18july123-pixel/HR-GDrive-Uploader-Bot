@@ -1,6 +1,7 @@
 import re
 import hashlib
 from contextlib import contextmanager
+from threading import Lock
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError  # FIX #5: needed for structured error handling
 from googleapiclient.http import MediaFileUpload
@@ -80,6 +81,12 @@ def list_children(user_token: dict, folder_id: str = "root", folders_only=False,
             q += f" and mimeType = '{FOLDER_MIME}'"
         elif files_only:
             q += f" and mimeType != '{FOLDER_MIME}'"
+        # Check cache first (UI responsiveness)
+        cache_key = f"list:{folder_id}:{folders_only}:{files_only}"
+        cached = _cache_get(False, cache_key)
+        if cached is not None:
+            return cached
+
         results = drive.files().list(
             q=q,
             fields="files(id, name, mimeType, size, modifiedTime, webViewLink, iconLink)",
@@ -88,7 +95,9 @@ def list_children(user_token: dict, folder_id: str = "root", folders_only=False,
             includeItemsFromAllDrives=True,
             supportsAllDrives=True,
         ).execute(num_retries=3)
-        return results.get("files", [])
+        files = results.get("files", [])
+        _cache_set(False, cache_key, files)
+        return files
     except (HttpError, RefreshError) as e:
         reason = getattr(e, "reason", None) or str(e)
         raise RuntimeError(f"Drive API error listing folder '{folder_id}': {reason}") from e
@@ -314,6 +323,31 @@ def _escape_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
+# Simple in-memory TTL caches to reduce repeated Drive API calls for UI responsiveness.
+_meta_cache: Dict[str, tuple[float, dict]] = {}
+_list_cache: Dict[str, tuple[float, list]] = {}
+_cache_lock = Lock()
+_DEFAULT_TTL = 30.0  # seconds
+
+def _cache_get(meta: bool, key: str):
+    now = time.time()
+    with _cache_lock:
+        store = _meta_cache if meta else _list_cache
+        v = store.get(key)
+        if not v:
+            return None
+        ts, val = v
+        if now - ts > _DEFAULT_TTL:
+            del store[key]
+            return None
+        return val
+
+def _cache_set(meta: bool, key: str, value):
+    with _cache_lock:
+        store = _meta_cache if meta else _list_cache
+        store[key] = (time.time(), value)
+
+
 def get_folder_path(user_token: dict, folder_id: str | None, _drive=None) -> str:
     """Human-readable ancestor path for a folder, e.g. 'CA Inter / Audit'."""
     if not folder_id or folder_id == "root":
@@ -526,6 +560,12 @@ def extract_id_from_link(link: str) -> str | None:
 
 def get_file_meta(user_token: dict, file_id: str) -> dict:
     with _handle_drive_errors(f"reading file metadata for '{file_id}'"):
+        # Try cache first to reduce latency for button presses
+        cache_key = f"meta:{file_id}"
+        cached = _cache_get(True, cache_key)
+        if cached is not None:
+            return cached
+
         drive = get_drive(user_token)
         # Request a comprehensive set of fields so callers can decide how to
         # handle the file (native vs binary) without extra API calls.
@@ -533,9 +573,9 @@ def get_file_meta(user_token: dict, file_id: str) -> dict:
             "id, name, mimeType, size, createdTime, modifiedTime, parents, "
             "webViewLink, webContentLink, iconLink, thumbnailLink, capabilities, owners, description"
         )
-        return drive.files().get(
-            fileId=file_id, fields=fields, supportsAllDrives=True
-        ).execute(num_retries=3)
+        meta = drive.files().get(fileId=file_id, fields=fields, supportsAllDrives=True).execute(num_retries=3)
+        _cache_set(True, cache_key, meta)
+        return meta
 
 
 def count_folder_contents(user_token: dict, folder_id: str, progress_cb=None) -> tuple[int, int, int]:
