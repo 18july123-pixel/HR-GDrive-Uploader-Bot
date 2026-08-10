@@ -7,6 +7,8 @@ from googleapiclient.http import MediaFileUpload
 from google.auth.exceptions import RefreshError
 
 from google_auth import credentials_from_dict
+from bot.google_client_manager import google_manager
+from google.oauth2.credentials import Credentials as GoogleCredentials
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
@@ -31,8 +33,23 @@ def _handle_drive_errors(operation: str):
         raise RuntimeError(f"Drive API error while {operation}: {reason}") from e
 
 
-def get_drive(user_token: dict):
-    creds = credentials_from_dict(user_token)
+def get_drive(user_token_or_creds):
+    """Accept either a user_token dict, a google.oauth2.credentials.Credentials
+    instance, or None to use a managed global client."""
+    # user_token_or_creds may be a dict with stored user credentials
+    if isinstance(user_token_or_creds, dict):
+        creds = credentials_from_dict(user_token_or_creds)
+    elif isinstance(user_token_or_creds, GoogleCredentials):
+        creds = user_token_or_creds
+    elif user_token_or_creds is None:
+        # Use an available manager client
+        client = google_manager.get_available_client()
+        if not client:
+            raise RuntimeError("No Google clients available in manager")
+        creds = google_manager.get_credentials_for(client)
+    else:
+        # Fallback: try to treat it like credentials
+        creds = user_token_or_creds
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
@@ -356,6 +373,38 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
                        progress_cb=None, retry_cb=None, max_attempts: int = 3,
                        backoff_seconds: float = 2.0) -> dict:
     # FIX #5: wrap the resumable upload loop so HttpErrors surface clearly
+    # If running without a per-user token, run via the GoogleClientManager so
+    # failures are classified and the client state is updated.
+    if user_token is None:
+        def _op(credentials):
+            attempt = 1
+            while True:
+                try:
+                    drive = get_drive(credentials)
+                    media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
+                    request = drive.files().create(
+                        body={"name": filename, "parents": [parent_id]},
+                        media_body=media,
+                        fields="id, name, size, webViewLink",
+                    )
+                    response = None
+                    while response is None:
+                        status, response = request.next_chunk()
+                        if status and progress_cb:
+                            progress_cb(status.progress())
+                    return response
+                except (HttpError, RefreshError) as e:
+                    reason = getattr(e, "reason", None) or str(e)
+                    if attempt >= max_attempts or not _is_retryable_upload_error(e):
+                        raise RuntimeError(f"Drive API error uploading '{filename}': {reason}") from e
+                    attempt += 1
+                    if retry_cb:
+                        retry_cb(attempt, max_attempts, reason)
+                    time.sleep(backoff_seconds * (2 ** (attempt - 2)))
+
+        return google_manager.execute(_op)
+
+    # Default per-user token flow
     attempt = 1
     while True:
         try:
