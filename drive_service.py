@@ -108,7 +108,10 @@ def mkdir(user_token: dict, name: str, parent_id: str = "root") -> dict:
     try:
         drive = get_drive(user_token)
         metadata = {"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]}
-        return drive.files().create(body=metadata, fields="id, name").execute()
+        result = drive.files().create(body=metadata, fields="id, name").execute()
+        # invalidate parent listing so the new folder appears
+        _cache_invalidate_near(file_id=result.get("id"), parent_id=parent_id)
+        return result
     except (HttpError, RefreshError) as e:
         reason = getattr(e, "reason", None) or str(e)
         raise RuntimeError(f"Drive API error creating folder '{name}': {reason}") from e
@@ -137,20 +140,34 @@ def copy(user_token: dict, file_id: str, new_parent_id: str, new_name: str | Non
         body = {"parents": [new_parent_id]}
         if new_name:
             body["name"] = new_name
-        return drive.files().copy(fileId=file_id, body=body, fields="id, name").execute()
+        res = drive.files().copy(fileId=file_id, body=body, fields="id, name").execute()
+        _cache_invalidate_near(file_id=res.get("id"), parent_id=new_parent_id)
+        return res
 
 
 def rename(user_token: dict, file_id: str, new_name: str) -> dict:
     with _handle_drive_errors(f"renaming file '{file_id}'"):
         drive = get_drive(user_token)
-        return drive.files().update(fileId=file_id, body={"name": new_name}, fields="id, name").execute()
+        res = drive.files().update(fileId=file_id, body={"name": new_name}, fields="id, name").execute()
+        _cache_invalidate_near(file_id=file_id)
+        return res
 
 
 def trash(user_token: dict, file_id: str):
     """Move a Drive item to Trash so it can be restored later."""
     try:
         drive = get_drive(user_token)
+        # Get parents if possible to invalidate their listings
+        try:
+            meta = drive.files().get(fileId=file_id, fields="parents").execute(num_retries=1)
+            parents = meta.get("parents") or []
+        except Exception:
+            parents = []
         drive.files().update(fileId=file_id, body={"trashed": True}).execute()
+        # Invalidate caches for the file and its parent(s)
+        _cache_invalidate_meta(file_id)
+        for p in parents:
+            _cache_invalidate_list_for_parent(p)
     except (HttpError, RefreshError) as e:
         reason = getattr(e, "reason", None) or str(e)
         raise RuntimeError(f"Drive API error moving file '{file_id}' to Trash: {reason}") from e
@@ -160,7 +177,15 @@ def restore(user_token: dict, file_id: str):
     """Restore a Drive item from Trash."""
     try:
         drive = get_drive(user_token)
+        try:
+            meta = drive.files().get(fileId=file_id, fields="parents").execute(num_retries=1)
+            parents = meta.get("parents") or []
+        except Exception:
+            parents = []
         drive.files().update(fileId=file_id, body={"trashed": False}).execute()
+        _cache_invalidate_meta(file_id)
+        for p in parents:
+            _cache_invalidate_list_for_parent(p)
     except (HttpError, RefreshError) as e:
         reason = getattr(e, "reason", None) or str(e)
         raise RuntimeError(f"Drive API error restoring file '{file_id}': {reason}") from e
@@ -216,6 +241,7 @@ def set_anyone_permission(user_token: dict, file_id: str, role: str = None) -> d
             drive.permissions().create(
                 fileId=file_id, body={"role": role, "type": "anyone"}
             ).execute()
+        _cache_invalidate_meta(file_id)
         return {"link": get_file_link(user_token, file_id), "role": role, "access": "anyone"}
 
 
@@ -226,6 +252,7 @@ def set_restricted(user_token: dict, file_id: str) -> dict:
         status = get_sharing_status(user_token, file_id)
         if status["access"] == "anyone" and status["permission_id"]:
             drive.permissions().delete(fileId=file_id, permissionId=status["permission_id"]).execute()
+        _cache_invalidate_meta(file_id)
         return {"link": get_file_link(user_token, file_id), "role": None, "access": "restricted"}
 
 
@@ -346,6 +373,27 @@ def _cache_set(meta: bool, key: str, value):
     with _cache_lock:
         store = _meta_cache if meta else _list_cache
         store[key] = (time.time(), value)
+
+
+def _cache_invalidate_meta(file_id: str):
+    with _cache_lock:
+        _meta_cache.pop(f"meta:{file_id}", None)
+
+
+def _cache_invalidate_list_for_parent(parent_id: str):
+    prefix = f"list:{parent_id}:"
+    with _cache_lock:
+        keys = [k for k in _list_cache.keys() if k.startswith(prefix)]
+        for k in keys:
+            _list_cache.pop(k, None)
+
+
+def _cache_invalidate_near(file_id: str = None, parent_id: str = None):
+    # Invalidate the file meta and the immediate parent folder listing(s).
+    if file_id:
+        _cache_invalidate_meta(file_id)
+    if parent_id:
+        _cache_invalidate_list_for_parent(parent_id)
 
 
 def get_folder_path(user_token: dict, folder_id: str | None, _drive=None) -> str:
@@ -510,7 +558,13 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
                         retry_cb(attempt, max_attempts, reason)
                     time.sleep(backoff_seconds * (2 ** (attempt - 2)))
 
-        return google_manager.execute(_op)
+        res = google_manager.execute(_op)
+        # Invalidate parent listing so the uploaded file appears
+        try:
+            _cache_invalidate_near(file_id=res.get("id"), parent_id=parent_id)
+        except Exception:
+            pass
+        return res
 
     # Default per-user token flow
     attempt = 1
@@ -537,6 +591,11 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
             if retry_cb:
                 retry_cb(attempt, max_attempts, reason)
             time.sleep(backoff_seconds * (2 ** (attempt - 2)))
+    finally:
+        try:
+            _cache_invalidate_list_for_parent(parent_id)
+        except Exception:
+            pass
 
 
 # Supports Drive files, Sheets, Docs, Slides, Forms, and published Forms
