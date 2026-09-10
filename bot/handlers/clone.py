@@ -1,6 +1,7 @@
 import json
 import asyncio
 import time
+import re
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
@@ -9,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 
 import database as db
 import drive_service
+import mega_service
 from utils import format_duration, html_link, human_bytes, progress_bar, safe_answer, safe_edit_text, user_message
 from bot.keyboards import clone_confirm
 from bot.states import CloneStates
@@ -49,6 +51,20 @@ async def receive_clone_link(message: Message, state: FSMContext):
 
 
 async def _process_clone_link(message: Message, user: dict, link: str):
+    # Mega.nz public URL branch. Reuses the same clone UI flow, but takes the
+    # source as a Mega public URL instead of a Drive file or folder ID.
+    if mega_service.is_mega_link(link):
+        try:
+            result = await asyncio.to_thread(mega_service.clone_public_link, link.strip(), message.from_user.id)
+        except Exception as exc:
+            await message.answer(f"❌ Couldn't import that Mega.nz link: {exc}")
+            return
+        await message.answer(
+            f"✅ Mega.nz link imported.\n\n📄 {html_link(result.get('name') or 'Mega item', result.get('webViewLink') or link.strip())}",
+            parse_mode="HTML",
+        )
+        return
+
     file_id = drive_service.extract_id_from_link(link.strip())
     if not file_id:
         await message.answer("❌ Couldn't parse a Drive link/ID from that. Please send a valid Drive link.")

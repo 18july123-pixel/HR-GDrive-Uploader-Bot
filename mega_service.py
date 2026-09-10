@@ -1,4 +1,5 @@
 import os
+import re
 
 from config import cfg
 import database as db
@@ -11,6 +12,18 @@ except Exception:  # pragma: no cover - dependency error surfaces clearly
 
 class MegaNotConfigured(RuntimeError):
     pass
+
+
+def is_mega_link(link: str | None) -> bool:
+    if not link:
+        return False
+    value = link.strip().lower()
+    return (
+        "mega.nz" in value
+        or "mega.co.nz" in value
+        or "mega.io" in value
+        or value.startswith("mega://")
+    )
 
 
 def _client(user_id: int | None = None):
@@ -37,6 +50,57 @@ def _client(user_id: int | None = None):
         return mega.login(email, password)
     except Exception as exc:
         raise RuntimeError(f"Unable to login to Mega.nz: {exc}") from exc
+
+
+def clone_public_link(public_url: str, user_id: int | None = None) -> dict:
+    """Import a public Mega.nz file/folder-style URL into the current
+    Mega account and return a normalized metadata dict.
+    """
+    client = _client(user_id=user_id)
+    try:
+        imported = client.import_public_url(public_url.strip())
+    except Exception as exc:
+        # Folder-style public links are not uniformly supported by mega.py.
+        # Fall back to a helpful, human-readable error instead of a crash.
+        raise RuntimeError(f"Unable to import that Mega.nz link: {exc}") from exc
+
+    name = None
+    link = None
+    file_id = None
+
+    # Try to read a public file info if the URL points to a file metadata object.
+    try:
+        info = client.get_public_url_info(public_url.strip())
+        name = info.get("name") if isinstance(info, dict) else None
+    except Exception:
+        name = None
+
+    # Try to infer a sharable public link after import for the imported node.
+    try:
+        link = client.get_link(imported)
+    except Exception:
+        try:
+            link = client.get_folder_link(imported)
+        except Exception:
+            link = None
+
+    # Try to pull an identifier out of the returned object.
+    try:
+        if isinstance(imported, (dict, tuple, list)):
+            if isinstance(imported, dict):
+                file_id = imported.get("h") or imported.get("id") or imported.get("name")
+            elif isinstance(imported, tuple):
+                file_id = imported[0] if imported else None
+            elif isinstance(imported, list):
+                file_id = imported[0].get("h") if imported and isinstance(imported[0], dict) else None
+    except Exception:
+        file_id = None
+
+    return {
+        "name": name or getattr(imported, "name", None) or os.path.basename(public_url.strip()),
+        "id": str(file_id) if file_id else None,
+        "webViewLink": link or public_url.strip(),
+    }
 
 
 def upload_local_file(local_path: str, filename: str | None = None, user_id: int | None = None) -> dict:
