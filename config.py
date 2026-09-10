@@ -4,7 +4,28 @@ import logging
 import shutil
 from dotenv import load_dotenv
 
+# Load the repo-local .env only as a fallback. The real deployment runtime
+# on Railway, Render, Koyeb, or similar already injects the environment into
+# os.environ; those values must win over a checked-in workspace .env file.
 load_dotenv()
+
+
+def _read_env(name: str, default: str = "") -> str:
+    """Read the deployment process environment first, then .env as fall back.
+
+    Also strips stray wrapping quotes so developers do not accidentally ship
+    "BOT_TOKEN="..." values from a shell or editor environment.
+    """
+    raw = os.getenv(name)
+    if raw is not None:
+        value = raw.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        return value
+    if default:
+        return default
+    return ""
+
 
 log = logging.getLogger("gdrive_bot.config")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,14 +105,14 @@ def _detect_public_base_url() -> str:
 
 class Config:
     # Telegram
-    BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-    ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8457503781").split(",") if x.strip()]
+    BOT_TOKEN = _read_env("BOT_TOKEN", "")
+    ADMIN_IDS = [int(x.strip().strip('"\'')) for x in _read_env("ADMIN_IDS", "").split(",") if x.strip()]
 
     # Google OAuth
-    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-    GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    GOOGLE_CLIENT_ID = _read_env("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET = _read_env("GOOGLE_CLIENT_SECRET", "")
     # Optional long-lived refresh token for a non-interactive primary client
-    GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN", "").strip()
+    GOOGLE_REFRESH_TOKEN = _read_env("GOOGLE_REFRESH_TOKEN", "").strip()
 
     # Multi-client support: when true the manager will load multiple
     # credential sets from numbered env vars or from `GOOGLE_CLIENTS`.
@@ -100,7 +121,7 @@ class Config:
 
     # JSON array string for additional clients. Example:
     # '[{"name":"c1","client_id":"...","client_secret":"...","refresh_token":"...","enabled":true}]'
-    GOOGLE_CLIENTS = os.getenv("GOOGLE_CLIENTS", "").strip()
+    GOOGLE_CLIENTS = _read_env("GOOGLE_CLIENTS", "").strip()
     GOOGLE_CLIENTS_CONFIGS = _parse_google_client_configs(GOOGLE_CLIENTS)
 
     GOOGLE_SCOPES = [
@@ -114,17 +135,17 @@ class Config:
     # explicitly set (see _detect_public_base_url above).
     WEBHOOK_BASE_URL = _detect_public_base_url()
     WEBHOOK_BASE_URL_SOURCE = (
-        "explicit env var" if os.getenv("WEBHOOK_BASE_URL", "").strip()
+        "explicit env var" if _read_env("WEBHOOK_BASE_URL", "").strip()
         else "auto-detected" if WEBHOOK_BASE_URL
         else "not found"
     )
     WEBHOOK_PATH = "/webhook"
-    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "changeme")
-    PORT = int(os.getenv("PORT", "8080"))
+    WEBHOOK_SECRET = _read_env("WEBHOOK_SECRET", "changeme")
+    PORT = int(_read_env("PORT", "8080"))
 
     # USE_WEBHOOK: "auto" (default) enables webhook mode automatically iff a
     # public base URL was found; set explicitly to "true"/"false" to override.
-    _use_webhook_raw = os.getenv("USE_WEBHOOK", "auto").strip().lower()
+    _use_webhook_raw = _read_env("USE_WEBHOOK", "auto").strip().lower()
     if _use_webhook_raw == "auto":
         USE_WEBHOOK = bool(WEBHOOK_BASE_URL)
     else:
@@ -132,51 +153,51 @@ class Config:
 
     # Must match a redirect URI configured in Google Cloud Console. Auto-built
     # from the detected public URL when not explicitly set.
-    OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip() or (
+    OAUTH_REDIRECT_URI = _read_env("OAUTH_REDIRECT_URI", "").strip() or (
         f"{WEBHOOK_BASE_URL}/oauth/callback" if WEBHOOK_BASE_URL
         else "http://localhost:8080/oauth/callback"
     )
 
     # Storage
-    DB_PATH = os.getenv("DB_PATH", os.path.join(BASE_DIR, "data", "bot_data.sqlite3"))
-    MONGO_URI = os.getenv("MONGO_URI", "").strip()
-    MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "gdrive_bot").strip()
-    MONGO_ENCRYPTION_KEY = os.getenv(
+    DB_PATH = _read_env("DB_PATH", os.path.join(BASE_DIR, "data", "bot_data.sqlite3"))
+    MONGO_URI = _read_env("MONGO_URI", "").strip()
+    MONGO_DB_NAME = _read_env("MONGO_DB_NAME", "gdrive_bot").strip()
+    MONGO_ENCRYPTION_KEY = _read_env(
         "MONGO_ENCRYPTION_KEY",
         "M2JmWl9nUThHcG9FT2JLUnpDZTR1TGp2U0VKaUdRWnlI",
     ).strip()
-    DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", os.path.join(BASE_DIR, "downloads"))
+    DOWNLOAD_DIR = _read_env("DOWNLOAD_DIR", os.path.join(BASE_DIR, "downloads"))
     DEFAULT_UPLOAD_FOLDER_NAME = "HR Gdrive"
 
     # Default sharing permission applied when a link is generated.
-    DEFAULT_SHARE_ROLE = os.getenv("DEFAULT_SHARE_ROLE", "reader")   # reader = Viewer
+    DEFAULT_SHARE_ROLE = _read_env("DEFAULT_SHARE_ROLE", "reader")   # reader = Viewer
 
     # Limits
-    FREE_UPLOAD_LIMIT_GB = float(os.getenv("FREE_UPLOAD_LIMIT_GB", "4"))
+    FREE_UPLOAD_LIMIT_GB = float(_read_env("FREE_UPLOAD_LIMIT_GB", "4"))
 
     # Duplicate detection
-    DUPLICATE_CHECK_ENABLED = os.getenv("DUPLICATE_CHECK_ENABLED", "true").lower() == "true"
+    DUPLICATE_CHECK_ENABLED = _read_env("DUPLICATE_CHECK_ENABLED", "true").lower() == "true"
     # How many Drive-wide candidates to inspect per upload
-    DUPLICATE_SEARCH_LIMIT = int(os.getenv("DUPLICATE_SEARCH_LIMIT", "10"))
-    UPLOAD_PARALLELISM = max(1, int(os.getenv("UPLOAD_PARALLELISM", "5")))
-    DOWNLOAD_WORKERS = int(os.getenv("DOWNLOAD_WORKERS", "2"))
-    UPLOAD_RETRY_LIMIT = int(os.getenv("UPLOAD_RETRY_LIMIT", "3"))
-    UPLOAD_RETRY_BACKOFF_SECONDS = float(os.getenv("UPLOAD_RETRY_BACKOFF_SECONDS", "2"))
+    DUPLICATE_SEARCH_LIMIT = int(_read_env("DUPLICATE_SEARCH_LIMIT", "10"))
+    UPLOAD_PARALLELISM = max(1, int(_read_env("UPLOAD_PARALLELISM", "5")))
+    DOWNLOAD_WORKERS = int(_read_env("DOWNLOAD_WORKERS", "2"))
+    UPLOAD_RETRY_LIMIT = int(_read_env("UPLOAD_RETRY_LIMIT", "3"))
+    UPLOAD_RETRY_BACKOFF_SECONDS = float(_read_env("UPLOAD_RETRY_BACKOFF_SECONDS", "2"))
 
     # Large-file resumable Drive uploads. Use a bigger chunk size for better
     # throughput on 1 GB / 2 GB files while staying within the bot process.
-    UPLOAD_CHUNKSIZE_MB = max(5, int(os.getenv("UPLOAD_CHUNKSIZE_MB", "10")))
+    UPLOAD_CHUNKSIZE_MB = max(5, int(_read_env("UPLOAD_CHUNKSIZE_MB", "10")))
     UPLOAD_CHUNKSIZE_BYTES = UPLOAD_CHUNKSIZE_MB * 1024 * 1024
 
     # Telegram file caps are effectively 2 GB; allow operators to tune a soft
     # cap here for the bot's own policy and UX before the Drive resumable upload.
-    UPLOAD_MAX_FILE_SIZE_BYTES = int(os.getenv("UPLOAD_MAX_FILE_SIZE_BYTES", str(4 * 1024 * 1024 * 1024)))
+    UPLOAD_MAX_FILE_SIZE_BYTES = int(_read_env("UPLOAD_MAX_FILE_SIZE_BYTES", str(4 * 1024 * 1024 * 1024)))
 
     # URL uploader / yt-dlp configuration
-    FFMPEG_LOCATION = os.getenv("FFMPEG_LOCATION", shutil.which("ffmpeg") or "ffmpeg")
-    MAX_CONCURRENT_DOWNLOADS = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "2"))
-    MAX_DOWNLOAD_SIZE_MB = int(os.getenv("MAX_DOWNLOAD_SIZE_MB", "0"))
-    DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", "60"))
+    FFMPEG_LOCATION = _read_env("FFMPEG_LOCATION", shutil.which("ffmpeg") or "ffmpeg")
+    MAX_CONCURRENT_DOWNLOADS = int(_read_env("MAX_CONCURRENT_DOWNLOADS", "2"))
+    MAX_DOWNLOAD_SIZE_MB = int(_read_env("MAX_DOWNLOAD_SIZE_MB", "0"))
+    DOWNLOAD_TIMEOUT = int(_read_env("DOWNLOAD_TIMEOUT", "60"))
 
 
 cfg = Config()
