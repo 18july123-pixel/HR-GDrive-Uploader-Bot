@@ -10,6 +10,26 @@ except Exception:  # pragma: no cover - dependency error surfaces clearly
     Mega = None
 
 
+def _is_folder_public_url(url: str) -> bool:
+    value = (url or "").strip().lower()
+    return (
+        "/folder/" in value
+        or "#f!" in value
+        or "#f/" in value
+        or "mega.nz/folder/" in value
+    )
+
+
+def _is_file_public_url(url: str) -> bool:
+    value = (url or "").strip().lower()
+    return (
+        "/file/" in value
+        or "#!/" in value
+        or "#!" in value
+        or "mega.nz/file/" in value
+    )
+
+
 class MegaNotConfigured(RuntimeError):
     pass
 
@@ -53,29 +73,86 @@ def _client(user_id: int | None = None):
 
 
 def clone_public_link(public_url: str, user_id: int | None = None) -> dict:
-    """Import a public Mega.nz file/folder-style URL into the current
+    """Import a public Mega.nz file or folder-style URL into the current
     Mega account and return a normalized metadata dict.
+
+    This repository uses the Python mega.py SDK, whose public import API is
+    file-oriented. For a public folder URL, the clone flow first detects the
+    folder URL shape and then tries the same import endpoint. If the installed
+    SDK cannot recursively materialize a public folder tree, this helper raises
+    a friendly RuntimeError instead of crashing the bot.
     """
     client = _client(user_id=user_id)
+    url = public_url.strip()
+
+    # Detect file vs folder URL shape before attempting public import.
+    if _is_folder_public_url(url):
+        # Best effort: try the low-level public folder import route and let
+        # the installed mega.py handle the object if it supports that format.
+        try:
+            imported = client.import_public_url(url)
+        except Exception as exc:
+            raise RuntimeError(
+                "Public Mega folder links require recursive folder import support "
+                "that is not available in the installed mega.py public file import path. "
+                f"Details: {exc}"
+            ) from exc
+
+        # Public folder import can produce either a dict, tuple, list, or a
+        # node object. Read what we can safely and shape it the same way as the
+        # current file metadata response.
+        try:
+            name = None
+            info = client.get_public_url_info(url)
+            if isinstance(info, dict):
+                name = info.get("name")
+        except Exception:
+            name = None
+
+        try:
+            link = client.get_folder_link(imported)
+        except Exception:
+            try:
+                link = client.get_link(imported)
+            except Exception:
+                link = None
+
+        try:
+            if isinstance(imported, dict):
+                file_id = imported.get("h") or imported.get("id") or imported.get("name")
+            elif isinstance(imported, tuple):
+                file_id = imported[0] if imported else None
+            elif isinstance(imported, list):
+                file_id = imported[0].get("h") if imported and isinstance(imported[0], dict) else None
+            else:
+                file_id = getattr(imported, "h", None) or getattr(imported, "id", None)
+        except Exception:
+            file_id = None
+
+        return {
+            "name": name or getattr(imported, "name", None) or os.path.basename(url),
+            "id": str(file_id) if file_id else None,
+            "webViewLink": link or url,
+            "kind": "folder",
+            "imported": True,
+        }
+
+    # File URL branch: support the public Mega file import route cleanly.
     try:
-        imported = client.import_public_url(public_url.strip())
+        imported = client.import_public_url(url)
     except Exception as exc:
-        # Folder-style public links are not uniformly supported by mega.py.
-        # Fall back to a helpful, human-readable error instead of a crash.
-        raise RuntimeError(f"Unable to import that Mega.nz link: {exc}") from exc
+        raise RuntimeError(f"Unable to import that Mega.nz file link: {exc}") from exc
 
     name = None
     link = None
     file_id = None
 
-    # Try to read a public file info if the URL points to a file metadata object.
     try:
-        info = client.get_public_url_info(public_url.strip())
+        info = client.get_public_url_info(url)
         name = info.get("name") if isinstance(info, dict) else None
     except Exception:
         name = None
 
-    # Try to infer a sharable public link after import for the imported node.
     try:
         link = client.get_link(imported)
     except Exception:
@@ -84,22 +161,24 @@ def clone_public_link(public_url: str, user_id: int | None = None) -> dict:
         except Exception:
             link = None
 
-    # Try to pull an identifier out of the returned object.
     try:
-        if isinstance(imported, (dict, tuple, list)):
-            if isinstance(imported, dict):
-                file_id = imported.get("h") or imported.get("id") or imported.get("name")
-            elif isinstance(imported, tuple):
-                file_id = imported[0] if imported else None
-            elif isinstance(imported, list):
-                file_id = imported[0].get("h") if imported and isinstance(imported[0], dict) else None
+        if isinstance(imported, dict):
+            file_id = imported.get("h") or imported.get("id") or imported.get("name")
+        elif isinstance(imported, tuple):
+            file_id = imported[0] if imported else None
+        elif isinstance(imported, list):
+            file_id = imported[0].get("h") if imported and isinstance(imported[0], dict) else None
+        else:
+            file_id = getattr(imported, "h", None) or getattr(imported, "id", None)
     except Exception:
         file_id = None
 
     return {
-        "name": name or getattr(imported, "name", None) or os.path.basename(public_url.strip()),
+        "name": name or getattr(imported, "name", None) or os.path.basename(url),
         "id": str(file_id) if file_id else None,
-        "webViewLink": link or public_url.strip(),
+        "webViewLink": link or url,
+        "kind": "file",
+        "imported": True,
     }
 
 

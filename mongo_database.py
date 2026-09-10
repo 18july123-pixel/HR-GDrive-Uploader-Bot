@@ -1,10 +1,37 @@
 """MongoDB persistence backend with the same API as database.py."""
 import json
 import time
+import base64
+from cryptography.fernet import Fernet
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import PyMongoError
 
 from config import cfg
+
+
+def _encryption_key() -> bytes:
+    # Stable key normalization for persistent MongoDB encryption.
+    key = (cfg.MONGO_ENCRYPTION_KEY or "").strip().encode("utf-8")
+    if len(key) < 32:
+        key = key.ljust(32, b"0")
+    elif len(key) > 32:
+        key = key[:32]
+    return base64.urlsafe_b64encode(key)
+
+
+def _encrypt(value: str) -> str:
+    if not value:
+        return ""
+    return Fernet(_encryption_key()).encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        return Fernet(_encryption_key()).decrypt(value.encode("utf-8")).decode("utf-8")
+    except Exception:
+        return ""
 
 _client = None
 _db = None
@@ -80,11 +107,11 @@ def set_google_token(user_id: int, token_json: dict, email: str):
     found = False
     for account in accounts:
         if account.get("email") == email:
-            account["token"] = json.dumps(token_json)
+            account["token"] = _encrypt(json.dumps(token_json))
             found = True
     if not found:
         accounts.append({"account_id": str(len(accounts) + 1), "email": email,
-                         "token": json.dumps(token_json), "is_default": not accounts,
+                         "token": _encrypt(json.dumps(token_json)), "is_default": not accounts,
                          "created_at": int(time.time())})
     default = next((a for a in accounts if a.get("is_default")), accounts[0])
     _users.update_one(
@@ -112,7 +139,11 @@ def get_google_token(user_id: int):
     if not user or not user.get("google_token"):
         return None
     try:
-        return json.loads(user["google_token"])
+        decrypted = _decrypt(user["google_token"])
+        if not decrypted:
+            clear_google_token(user_id)
+            return None
+        return json.loads(decrypted)
     except (json.JSONDecodeError, TypeError):
         clear_google_token(user_id)
         return None
@@ -128,13 +159,14 @@ def set_mega_account(user_id: int, email: str, password: str):
     user = get_user(user_id) or {}
     accounts = user.get("mega_accounts", [])
     found = False
+    encrypted_password = _encrypt(password)
     for account in accounts:
         if account.get("email") == email:
-            account["password"] = password
+            account["password"] = encrypted_password
             found = True
     if not found:
         accounts.append({"account_id": str(len(accounts) + 1), "email": email,
-                         "password": password, "is_default": not accounts,
+                         "password": encrypted_password, "is_default": not accounts,
                          "created_at": int(time.time())})
     default = next((a for a in accounts if a.get("is_default")), accounts[0])
     _users.update_one(
@@ -155,6 +187,39 @@ def clear_mega_account(user_id: int):
         _users.update_one({"user_id": user_id}, {"$set": {"mega_accounts": accounts, "mega_email": accounts[0]["email"], "mega_token": accounts[0]["password"]}})
     else:
         _users.update_one({"user_id": user_id}, {"$unset": {"mega_accounts": "", "mega_email": "", "mega_token": ""}})
+
+
+def set_mega_session_from_login(user_id: int, email: str, session_obj: dict):
+    """Store an encrypted Mega session payload for a user and keep a per-user session map.
+    This prevents storing a cleartext password or raw session object in MongoDB.
+    """
+    blob = _encrypt(json.dumps(session_obj, sort_keys=True))
+    user = get_user(user_id) or {}
+    accounts = user.get("mega_accounts", []) or []
+    found = False
+    for account in accounts:
+        if account.get("email") == email:
+            account["password"] = blob
+            found = True
+    if not found:
+        accounts.append({
+            "account_id": str(len(accounts) + 1),
+            "email": email,
+            "password": blob,
+            "is_default": not accounts,
+            "created_at": int(time.time()),
+        })
+    default = next((a for a in accounts if a.get("is_default")), accounts[0])
+    _users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "mega_accounts": accounts,
+            "mega_email": default["email"],
+            "mega_token": default["password"],
+            "mega_session": blob,
+        }},
+        upsert=True,
+    )
 
 
 def get_mega_accounts(user_id: int):
@@ -179,7 +244,11 @@ def get_mega_credentials(user_id: int):
     user = get_user(user_id)
     if not user or not user.get("mega_email") or not user.get("mega_token"):
         return None
-    return {"email": user["mega_email"], "password": user["mega_token"]}
+    password = _decrypt(user["mega_token"])
+    if not password:
+        clear_mega_account(user_id)
+        return None
+    return {"email": user["mega_email"], "password": password}
 
 
 def set_default_account(user_id: int, account_ref: str) -> bool:

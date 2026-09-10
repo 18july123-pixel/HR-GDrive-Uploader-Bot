@@ -141,6 +141,10 @@ class Config:
     DB_PATH = os.getenv("DB_PATH", os.path.join(BASE_DIR, "data", "bot_data.sqlite3"))
     MONGO_URI = os.getenv("MONGO_URI", "").strip()
     MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "gdrive_bot").strip()
+    MONGO_ENCRYPTION_KEY = os.getenv(
+        "MONGO_ENCRYPTION_KEY",
+        "M2JmWl9nUThHcG9FT2JLUnpDZTR1TGp2U0VKaUdRWnlI",
+    ).strip()
     DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", os.path.join(BASE_DIR, "downloads"))
     DEFAULT_UPLOAD_FOLDER_NAME = "HR Gdrive"
 

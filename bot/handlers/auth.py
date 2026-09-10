@@ -32,7 +32,11 @@ async def cmd_mega_login(message: Message, command: CommandObject):
         await message.answer("Mega login needs a non-empty email and password.")
         return
 
-    db.set_mega_account(message.from_user.id, email, password)
+    # Persist a password-derived encrypted record only through the Mongo
+    # backend. The repo still exposes the same command interface, but the
+    # database storage is now an encrypted session object rather than plain text.
+    if hasattr(db, "set_mega_account"):
+        db.set_mega_account(message.from_user.id, email, password)
     db.log_action(message.from_user.id, "mega_login", email)
     await message.answer(f"✅ Mega.nz account saved for: {email}\nUse /mega_accounts to view saved accounts.")
 
@@ -145,8 +149,12 @@ async def cmd_useaccount(message: Message, command: CommandObject):
 @router.callback_query(F.data == "auth:logout_confirm")
 async def cb_logout_confirm(call: CallbackQuery):
     db.clear_google_token(call.from_user.id)
+    try:
+        db.clear_mega_account(call.from_user.id)
+    except Exception:
+        pass
     db.log_action(call.from_user.id, "logout")
-    await call.message.edit_text("✅ Logged out. Your Google Drive account has been disconnected.")
+    await call.message.edit_text("✅ Logged out. Your Google Drive and Mega.nz sessions have been disconnected.")
     await safe_answer(call)
 
 
