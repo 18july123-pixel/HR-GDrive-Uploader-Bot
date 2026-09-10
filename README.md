@@ -1,11 +1,11 @@
-# HR Drive & Mega Uploader Bot
+# HR Drive Uploader Bot
 
-Helping HR teams upload, clone, and manage files in Google Drive and Mega.nz via Telegram.
+A Telegram bot for Google Drive upload, clone, and management workflows for HR teams.
 
 **Quick highlights**
-- Supports Google OAuth, multiple Drive accounts, and optional Mega.nz credentials.
-- Resumable Drive uploads with duplicate detection and Mega upload/export flows.
-- Provider-aware `/clone` support for Google Drive and Mega.nz public links.
+- Google OAuth and multi-account Drive support.
+- Resumable Drive uploads with duplicate detection.
+- Provider-aware Drive link cloning.
 - Per-user job queue with configurable worker pools.
 - Lightweight: runs with local SQLite or MongoDB for scale.
 - Deployable via Docker, Docker Compose, or platform services (Railway/Koyeb).
@@ -43,9 +43,6 @@ ADMIN_IDS - comma-separated Telegram user IDs
 GOOGLE_CLIENT_ID - Google OAuth client ID
 GOOGLE_CLIENT_SECRET - Google OAuth client secret
 GOOGLE_REFRESH_TOKEN - optional Google refresh token
-
-MEGA_EMAIL - optional default Mega.nz login email
-MEGA_PASSWORD - optional default Mega.nz login password
 
 DB_PATH - /app/data/bot_data.sqlite3
 DOWNLOAD_DIR - /app/downloads
@@ -114,7 +111,7 @@ refresh tokens. Only clients missing `ID` or `SECRET` are ignored.
 - Duplicate detection by name/size/hash; prompts to use existing file or upload anyway.
 - UI: progress messages with inline Cancel button for each job.
 - Jobs are stored in DB; interrupted jobs are marked on restart.
-
+- `/clone <link>` detects Google Drive provider URLs and routes them through the Drive clone branch.
 
 **Support**
 - Open an issue with logs and reproduction steps.

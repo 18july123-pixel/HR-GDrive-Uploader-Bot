@@ -10,7 +10,6 @@ from aiogram.fsm.context import FSMContext
 
 import database as db
 import drive_service
-import mega_service
 from utils import format_duration, html_link, human_bytes, progress_bar, safe_answer, safe_edit_text, user_message
 from bot.keyboards import clone_confirm
 from bot.states import CloneStates
@@ -21,13 +20,10 @@ router = Router()
 def detect_provider(link: str) -> str | None:
     """Return the provider for a single incoming clone link.
 
-    The helper is intentionally simple and side-effect free. The Google Drive
-    branch is parsed by the existing extractor, while the Mega branch is
-    recognized by the canonical Mega URL marker helpers in mega_service.py.
+    The repository is Google Drive only. The helper intentionally only
+    recognizes Google Drive public URLs and rejects every other provider.
     """
     value = (link or "").strip()
-    if mega_service.is_mega_link(value):
-        return "mega"
     if drive_service.extract_id_from_link(value):
         return "drive"
     return None
@@ -46,7 +42,7 @@ async def cmd_clone(message: Message, command: CommandObject, state: FSMContext)
     link = command.args
     if not link:
         await state.set_state(CloneStates.waiting_link)
-        await message.answer("🔗 Send me the Google Drive or MEGA.nz link (file or folder) you want to clone.")
+        await message.answer("🔗 Send me the Google Drive link (file or folder) you want to clone.")
         return
 
     await _process_clone_link(message, db.get_user(message.from_user.id), link)
@@ -60,19 +56,6 @@ async def receive_clone_link(message: Message, state: FSMContext):
 
 async def _process_clone_link(message: Message, user: dict | None | None, link: str):
     provider = detect_provider(link)
-    if provider == "mega":
-        await message.answer("🔍 Detecting link...\n🟢 MEGA link detected\n📁 Cloning...")
-        try:
-            result = await asyncio.to_thread(mega_service.clone_public_link, link.strip(), message.from_user.id)
-        except Exception as exc:
-            await message.answer(f"❌ Couldn't import that Mega.nz link: {exc}")
-            return
-        await message.answer(
-            f"✅ Clone completed\n\n📁 Name: {result.get('name') or 'Mega item'}\n📦 Files: {result.get('files_total') or '1'}\n\n📄 {html_link(result.get('name') or 'Mega item', result.get('webViewLink') or link.strip())}",
-            parse_mode="HTML",
-        )
-        return
-
     if provider == "drive":
         if not user or not user.get("google_token"):
             await message.answer("☁️ Connect your Google Drive first with /login.")
@@ -160,7 +143,7 @@ async def _process_clone_link(message: Message, user: dict | None | None, link: 
             await message.answer(text, reply_markup=clone_confirm(str(job_id)))
         return
 
-    await message.answer("❌ Unsupported link. Please provide a Google Drive or MEGA.nz link.")
+    await message.answer("❌ Unsupported link. Please provide a Google Drive link.")
 
     if not file_id:
         await message.answer("❌ Couldn't parse a Drive link/ID from that. Please send a valid Drive link.")

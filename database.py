@@ -40,8 +40,6 @@ def init_db():
                 username TEXT,
                 google_email TEXT,
                 google_token TEXT,          -- JSON blob of OAuth credentials
-                mega_email TEXT,
-                mega_token TEXT,            -- JSON blob of Mega.nz email/password
                 is_banned INTEGER DEFAULT 0,
                 is_premium INTEGER DEFAULT 0,
                 default_folder_id TEXT,
@@ -77,16 +75,6 @@ def init_db():
                 UNIQUE(user_id, email)
             );
 
-            CREATE TABLE IF NOT EXISTS mega_accounts (
-                account_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                is_default INTEGER DEFAULT 0,
-                created_at INTEGER,
-                UNIQUE(user_id, email)
-            );
-
             CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
@@ -101,16 +89,6 @@ def init_db():
             );
             """
         )
-        # Ensure the optional Mega columns exist on older SQLite installs.
-        try:
-            conn.execute("PRAGMA table_info(users)")
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
-            if "mega_email" not in cols:
-                conn.execute("ALTER TABLE users ADD COLUMN mega_email TEXT")
-            if "mega_token" not in cols:
-                conn.execute("ALTER TABLE users ADD COLUMN mega_token TEXT")
-        except Exception:
-            pass
         conn.execute(
             "INSERT OR IGNORE INTO bot_state (key, value) VALUES ('bot_enabled', '1')"
         )
@@ -206,91 +184,6 @@ def get_google_accounts(user_id: int):
             "SELECT account_id,email,is_default,created_at FROM google_accounts WHERE user_id=? ORDER BY account_id",
             (user_id,),
         ).fetchall()]
-
-
-def set_mega_account(user_id: int, email: str, password: str):
-    with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT account_id FROM mega_accounts WHERE user_id=? AND email=?",
-            (user_id, email),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE mega_accounts SET password=? WHERE account_id=?",
-                (password, existing["account_id"]),
-            )
-        else:
-            has_default = conn.execute(
-                "SELECT 1 FROM mega_accounts WHERE user_id=? AND is_default=1 LIMIT 1",
-                (user_id,),
-            ).fetchone()
-            conn.execute(
-                "INSERT INTO mega_accounts (user_id,email,password,is_default,created_at) VALUES (?,?,?,?,?)",
-                (user_id, email, password, 0 if has_default else 1, int(time.time())),
-            )
-        selected = conn.execute(
-            "SELECT email,password FROM mega_accounts WHERE user_id=? AND is_default=1",
-            (user_id,),
-        ).fetchone()
-        if selected:
-            conn.execute(
-                "UPDATE users SET mega_email=?, mega_token=? WHERE user_id=?",
-                (selected["email"], selected["password"], user_id),
-            )
-
-
-def clear_mega_account(user_id: int):
-    with get_conn() as conn:
-        account = conn.execute(
-            "SELECT account_id FROM mega_accounts WHERE user_id=? AND is_default=1",
-            (user_id,),
-        ).fetchone()
-        if account:
-            conn.execute("DELETE FROM mega_accounts WHERE account_id=?", (account["account_id"],))
-            replacement = conn.execute(
-                "SELECT account_id,email,password FROM mega_accounts WHERE user_id=? ORDER BY account_id LIMIT 1",
-                (user_id,),
-            ).fetchone()
-            if replacement:
-                conn.execute("UPDATE mega_accounts SET is_default=1 WHERE account_id=?", (replacement["account_id"],))
-                conn.execute(
-                    "UPDATE users SET mega_email=?, mega_token=? WHERE user_id=?",
-                    (replacement["email"], replacement["password"], user_id),
-                )
-                return
-        conn.execute(
-            "UPDATE users SET mega_email=NULL, mega_token=NULL WHERE user_id=?",
-            (user_id,),
-        )
-
-
-def get_mega_accounts(user_id: int):
-    with get_conn() as conn:
-        return [dict(row) for row in conn.execute(
-            "SELECT account_id,email,is_default,created_at FROM mega_accounts WHERE user_id=? ORDER BY account_id",
-            (user_id,),
-        ).fetchall()]
-
-
-def set_default_mega_account(user_id: int, account_ref: str) -> bool:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT account_id,email,password FROM mega_accounts WHERE user_id=? AND (email=? OR CAST(account_id AS TEXT)=?)",
-            (user_id, account_ref, account_ref),
-        ).fetchone()
-        if not row:
-            return False
-        conn.execute("UPDATE mega_accounts SET is_default=0 WHERE user_id=?", (user_id,))
-        conn.execute("UPDATE mega_accounts SET is_default=1 WHERE account_id=?", (row["account_id"],))
-        conn.execute("UPDATE users SET mega_email=?, mega_token=? WHERE user_id=?", (row["email"], row["password"], user_id))
-        return True
-
-
-def get_mega_credentials(user_id: int):
-    user = get_user(user_id)
-    if user and user.get("mega_email") and user.get("mega_token"):
-        return {"email": user["mega_email"], "password": user["mega_token"]}
-    return None
 
 
 def set_default_account(user_id: int, account_ref: str) -> bool:
@@ -476,11 +369,10 @@ def set_state(key: str, value: str):
 # local SQLite backend for development and single-instance deployments.
 if cfg.MONGO_URI:
     from mongo_database import (  # noqa: E402
-        all_active_jobs, all_users, clear_google_token, clear_mega_account,
+        all_active_jobs, all_users, clear_google_token,
         count_users, count_usage_since, create_job, get_google_token,
-        get_job, get_state, get_google_accounts, get_mega_accounts,
-        get_mega_credentials, set_default_account, set_default_mega_account,
+        get_job, get_state, get_google_accounts, set_default_account,
         get_user, increment_stat, init_db, log_action, recover_interrupted_jobs,
-        recent_logs, set_google_token, set_mega_account, set_state,
+        recent_logs, set_google_token, set_state,
         update_job, update_user_field, upsert_user, active_jobs_for_user,
     )

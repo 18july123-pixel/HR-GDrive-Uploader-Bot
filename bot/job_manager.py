@@ -7,7 +7,6 @@ from typing import Any, Dict
 import database as db
 from config import cfg
 import drive_service
-import mega_service
 from utils import safe_edit_text, schedule_safe_edit_text, html_link, human_bytes, format_duration
 from bot.keyboards import job_actions, duplicate_confirm
 
@@ -170,38 +169,35 @@ class JobManager:
                     continue
 
                 # Duplicate check is only meaningful for Drive uploads.
-                # Mega.nz upload flow is intentionally independent and should not
-                # ask Google Drive for duplicate candidates.
-                if job.backend == "drive":
-                    try:
-                        md5 = await asyncio.to_thread(drive_service.local_md5, job.local_path)
-                        candidates = await asyncio.to_thread(drive_service.find_duplicates, db.get_google_token(job.user_id), job.filename, size=job.size, md5=md5, limit=cfg.DUPLICATE_SEARCH_LIMIT)
-                    except Exception:
-                        candidates = []
+                try:
+                    md5 = await asyncio.to_thread(drive_service.local_md5, job.local_path)
+                    candidates = await asyncio.to_thread(drive_service.find_duplicates, db.get_google_token(job.user_id), job.filename, size=job.size, md5=md5, limit=cfg.DUPLICATE_SEARCH_LIMIT)
+                except Exception:
+                    candidates = []
 
-                    if candidates:
-                        # expose to existing UI logic by placing into a pending dict
-                        from bot.handlers.upload import _pending  # dynamic import to avoid cycle
-                        best = candidates[0]
-                        _pending[job.job_id] = {
-                            "local_path": job.local_path,
-                            "filename": job.filename,
-                            "size": job.size,
-                            "folder_id": job.folder_id,
-                            "user_id": job.user_id,
-                            "md5": md5,
-                            "candidate": best,
-                            "created_at": time.time(),
-                        }
-                        db.update_job(job.job_id, status="duplicate_pending")
-                        if job.status_msg:
-                            await safe_edit_text(
-                                job.status_msg,
-                                "⚠️ Duplicate detected — please choose an action.",
-                                reply_markup=duplicate_confirm(str(job.job_id)),
-                            )
-                        self.pending_q.task_done()
-                        continue
+                if candidates:
+                    # expose to existing UI logic by placing into a pending dict
+                    from bot.handlers.upload import _pending  # dynamic import to avoid cycle
+                    best = candidates[0]
+                    _pending[job.job_id] = {
+                        "local_path": job.local_path,
+                        "filename": job.filename,
+                        "size": job.size,
+                        "folder_id": job.folder_id,
+                        "user_id": job.user_id,
+                        "md5": md5,
+                        "candidate": best,
+                        "created_at": time.time(),
+                    }
+                    db.update_job(job.job_id, status="duplicate_pending")
+                    if job.status_msg:
+                        await safe_edit_text(
+                            job.status_msg,
+                            "⚠️ Duplicate detected — please choose an action.",
+                            reply_markup=duplicate_confirm(str(job.job_id)),
+                        )
+                    self.pending_q.task_done()
+                    continue
 
                 # enqueue for upload (respect cancellation)
                 if job.status != "cancelled":
@@ -249,22 +245,13 @@ class JobManager:
                             log.debug("Unable to schedule upload progress edit for job %s", job.job_id, exc_info=True)
 
                 try:
-                    if job.backend == "mega":
-                        result = await asyncio.to_thread(mega_service.upload_local_file, job.local_path, job.filename, job.user_id)
-                        job.status = "done"
-                        job.finished_at = time.time()
-                        db.update_job(job.job_id, status="done", progress=100, bytes_total=job.size, bytes_done=job.size)
-                        db.increment_stat(job.user_id, uploads=1, uploaded_bytes=job.size or 0)
-                        if job.status_msg:
-                            await safe_edit_text(job.status_msg, f"✅ Uploaded to Mega.nz: {job.filename}\n📦 {human_bytes(job.size)}", reply_markup=job_actions(job.job_id))
-                    else:
-                        await asyncio.to_thread(drive_service.upload_local_file, db.get_google_token(job.user_id), job.local_path, job.filename, job.folder_id, progress_cb, None, cfg.UPLOAD_RETRY_LIMIT, cfg.UPLOAD_RETRY_BACKOFF_SECONDS)
-                        job.status = "done"
-                        job.finished_at = time.time()
-                        db.update_job(job.job_id, status="done", progress=100, bytes_total=job.size, bytes_done=job.size)
-                        db.increment_stat(job.user_id, uploads=1, uploaded_bytes=job.size or 0)
-                        if job.status_msg:
-                            await safe_edit_text(job.status_msg, f"✅ Uploaded: {job.filename}\n📦 {human_bytes(job.size)}", reply_markup=job_actions(job.job_id))
+                    await asyncio.to_thread(drive_service.upload_local_file, db.get_google_token(job.user_id), job.local_path, job.filename, job.folder_id, progress_cb, None, cfg.UPLOAD_RETRY_LIMIT, cfg.UPLOAD_RETRY_BACKOFF_SECONDS)
+                    job.status = "done"
+                    job.finished_at = time.time()
+                    db.update_job(job.job_id, status="done", progress=100, bytes_total=job.size, bytes_done=job.size)
+                    db.increment_stat(job.user_id, uploads=1, uploaded_bytes=job.size or 0)
+                    if job.status_msg:
+                        await safe_edit_text(job.status_msg, f"✅ Uploaded: {job.filename}\n📦 {human_bytes(job.size)}", reply_markup=job_actions(job.job_id))
                 except Exception as e:
                     job.status = "error"
                     job.error = str(e)
