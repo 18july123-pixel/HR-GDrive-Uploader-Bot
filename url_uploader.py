@@ -81,6 +81,15 @@ def sanitize_filename(name: str) -> str:
     return cleaned[:120] or "download"
 
 
+def sanitize_file_stem(name: str) -> str:
+    """Backward-compatibility alias used by the rename waiting state.
+
+    The action callback names, and the existing route for rename prompts,
+    should stay stable even if the main safe-filename routine is renamed.
+    """
+    return sanitize_filename(name)
+
+
 def default_download_dir_for_job(job_id: str) -> str:
     base = os.path.abspath(getattr(cfg, "DOWNLOAD_DIR", os.path.join(os.getcwd(), "downloads")))
     tmp = os.path.join(base, "temp", job_id)
@@ -227,6 +236,15 @@ async def cancel_job(job_id: str):
     except Exception:
         log.warning("Failed to remove URL uploader temp dir for %s", job_id, exc_info=True)
     uploader_jobs.pop(job_id, None)
+
+
+async def start_download_job(job_id: str, status_message: Message | CallbackQuery, rename_name: str | None):
+    """Alias entry point used by the callback flow and the rename flow.
+
+    Robustly pointing both the UI callback action and the rename input route
+    to the concrete yt-dlp download implementation object in one place.
+    """
+    await start_download(job_id, status_message, rename_name)
 
 
 async def start_download(job_id: str, status_message: Message | CallbackQuery, rename_name: str | None):
