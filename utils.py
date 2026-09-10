@@ -1,6 +1,7 @@
 from config import cfg
 import html
 import logging
+import asyncio
 
 from aiogram.exceptions import TelegramBadRequest
 
@@ -68,6 +69,18 @@ async def safe_edit_text(message, text: str, **kwargs) -> bool:
         if "message is not modified" in str(exc).lower():
             return False
         raise
+
+
+def schedule_safe_edit_text(loop, message, text: str, **kwargs):
+    """Schedule a safe_edit_text coroutine onto the async loop that owns the bot.
+
+    This is intended for synchronous callbacks running in a ThreadPoolExecutor
+    worker (such as upload progress callbacks). They cannot probe or create an
+    event loop for themselves, so the coroutine must be posted to the original
+    async loop object captured from the worker's owning coroutine.
+    """
+    coro = safe_edit_text(message, text, **kwargs)
+    return asyncio.run_coroutine_threadsafe(coro, loop)
 
 
 async def safe_answer(callback, text: str | None = None, **kwargs) -> bool:

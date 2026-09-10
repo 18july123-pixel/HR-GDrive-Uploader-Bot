@@ -7,7 +7,7 @@ from typing import Any, Dict
 import database as db
 from config import cfg
 import drive_service
-from utils import safe_edit_text, html_link, human_bytes, format_duration
+from utils import safe_edit_text, schedule_safe_edit_text, html_link, human_bytes, format_duration
 from bot.keyboards import job_actions, duplicate_confirm
 
 log = logging.getLogger("gdrive_bot.jobmgr")
@@ -210,6 +210,10 @@ class JobManager:
                 log.exception("Download worker error")
 
     async def _upload_worker(self):
+        # Capture the event loop that owns the worker task. Uploaded progress
+        # callbacks land in a threadpool thread and must post updates back onto
+        # this loop rather than trying to retrieve an event-loop from the thread.
+        loop = asyncio.get_running_loop()
         while True:
             try:
                 job_id = await self.upload_q.get()
@@ -227,8 +231,17 @@ class JobManager:
                 def progress_cb(pct):
                     job.progress = pct
                     if job.status_msg:
-                        # best-effort update
-                        asyncio.get_event_loop().call_soon_threadsafe(asyncio.create_task, safe_edit_text(job.status_msg, f"⬆️ Uploading {job.filename} — {int(pct*100)}%"))
+                        # best-effort update; the thread callback cannot see
+                        # the current async loop, so schedule a coroutine onto
+                        # the loop that owns this upload worker.
+                        try:
+                            schedule_safe_edit_text(
+                                loop,
+                                job.status_msg,
+                                f"⬆️ Uploading {job.filename} — {int(pct*100)}%",
+                            )
+                        except Exception:
+                            log.debug("Unable to schedule upload progress edit for job %s", job.job_id, exc_info=True)
 
                 try:
                     await asyncio.to_thread(drive_service.upload_local_file, db.get_google_token(job.user_id), job.local_path, job.filename, job.folder_id, progress_cb, None, cfg.UPLOAD_RETRY_LIMIT, cfg.UPLOAD_RETRY_BACKOFF_SECONDS)

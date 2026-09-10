@@ -676,6 +676,9 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
     # FIX #5: wrap the resumable upload loop so HttpErrors surface clearly
     # If running without a per-user token, run via the GoogleClientManager so
     # failures are classified and the client state is updated.
+    # Support large files (1 GB / 2 GB class) by making the chunk size explicit
+    # and configurable in config.py via UPLOAD_CHUNKSIZE_MB.
+    chunksize = cfg.UPLOAD_CHUNKSIZE_BYTES
     try:
         if user_token is None:
             def _op(credentials):
@@ -683,7 +686,7 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
                 while True:
                     try:
                         drive = get_drive(credentials)
-                        media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
+                        media = MediaFileUpload(local_path, resumable=True, chunksize=chunksize)
                         request = drive.files().create(
                             body={"name": filename, "parents": [parent_id]},
                             media_body=media,
@@ -693,7 +696,10 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
                         while response is None:
                             status, response = request.next_chunk()
                             if status and progress_cb:
-                                progress_cb(status.progress())
+                                try:
+                                    progress_cb(status.progress())
+                                except Exception:
+                                    pass
                         return response
                     except (HttpError, RefreshError) as e:
                         reason = getattr(e, "reason", None) or str(e)
@@ -717,7 +723,7 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
         while True:
             try:
                 drive = get_drive(user_token)
-                media = MediaFileUpload(local_path, resumable=True, chunksize=1024 * 1024 * 5)
+                media = MediaFileUpload(local_path, resumable=True, chunksize=chunksize)
                 request = drive.files().create(
                     body={"name": filename, "parents": [parent_id]},
                     media_body=media,
@@ -727,7 +733,10 @@ def upload_local_file(user_token: dict, local_path: str, filename: str, parent_i
                 while response is None:
                     status, response = request.next_chunk()
                     if status and progress_cb:
-                        progress_cb(status.progress())
+                        try:
+                            progress_cb(status.progress())
+                        except Exception:
+                            pass
                 return response
             except (HttpError, RefreshError) as e:
                 reason = getattr(e, "reason", None) or str(e)

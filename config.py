@@ -160,6 +160,15 @@ class Config:
     UPLOAD_RETRY_LIMIT = int(os.getenv("UPLOAD_RETRY_LIMIT", "3"))
     UPLOAD_RETRY_BACKOFF_SECONDS = float(os.getenv("UPLOAD_RETRY_BACKOFF_SECONDS", "2"))
 
+    # Large-file resumable Drive uploads. Use a bigger chunk size for better
+    # throughput on 1 GB / 2 GB files while staying within the bot process.
+    UPLOAD_CHUNKSIZE_MB = max(5, int(os.getenv("UPLOAD_CHUNKSIZE_MB", "10")))
+    UPLOAD_CHUNKSIZE_BYTES = UPLOAD_CHUNKSIZE_MB * 1024 * 1024
+
+    # Telegram file caps are effectively 2 GB; allow operators to tune a soft
+    # cap here for the bot's own policy and UX before the Drive resumable upload.
+    UPLOAD_MAX_FILE_SIZE_BYTES = int(os.getenv("UPLOAD_MAX_FILE_SIZE_BYTES", str(4 * 1024 * 1024 * 1024)))
+
 
 cfg = Config()
 

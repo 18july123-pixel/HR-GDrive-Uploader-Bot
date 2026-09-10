@@ -374,22 +374,68 @@ def _ensure_upload_worker(user_id: int):
     return _upload_queues[user_id]
 
 
-@router.message(UploadStates.waiting_file, F.document | F.video | F.audio | F.photo)
+@router.message(
+    UploadStates.waiting_file,
+    F.document | F.video | F.audio | F.photo | F.animation | F.voice | F.video_note | F.sticker,
+)
 async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
     user = await _ensure_connected(message)
     if not user:
         return
     token = json.loads(user["google_token"])
 
+    # Normalize all supported Telegram media shapes into a common tuple:
+    # (telegram_file_obj, filename, size_bytes).
+    tg_file = None
+    filename = None
+    size = 0
+
     if message.document:
-        tg_file, filename, size = message.document, message.document.file_name, message.document.file_size or 0
+        tg_file = message.document
+        filename = message.document.file_name or f"document_{int(time.time())}.bin"
+        size = message.document.file_size or 0
     elif message.video:
-        tg_file, filename, size = message.video, message.video.file_name or f"video_{int(time.time())}.mp4", message.video.file_size or 0
+        tg_file = message.video
+        filename = message.video.file_name or f"video_{int(time.time())}.mp4"
+        size = message.video.file_size or 0
+    elif message.animation:
+        tg_file = message.animation
+        filename = message.animation.file_name or f"animation_{int(time.time())}.gif"
+        size = message.animation.file_size or 0
     elif message.audio:
-        tg_file, filename, size = message.audio, message.audio.file_name or f"audio_{int(time.time())}.mp3", message.audio.file_size or 0
-    else:
+        tg_file = message.audio
+        filename = message.audio.file_name or f"audio_{int(time.time())}.mp3"
+        size = message.audio.file_size or 0
+    elif message.voice:
+        tg_file = message.voice
+        filename = message.voice.file_name or f"voice_{int(time.time())}.ogg"
+        size = message.voice.file_size or 0
+    elif message.video_note:
+        tg_file = message.video_note
+        filename = f"video_note_{int(time.time())}.mp4"
+        size = message.video_note.file_size or 0
+    elif message.sticker:
+        tg_file = message.sticker
+        filename = f"sticker_{int(time.time())}.webp"
+        size = message.sticker.file_size or 0
+    elif message.photo:
         photo = message.photo[-1]
-        tg_file, filename, size = photo, f"photo_{int(time.time())}.jpg", photo.file_size or 0
+        tg_file = photo
+        filename = f"photo_{int(time.time())}.jpg"
+        size = photo.file_size or 0
+    else:
+        await message.answer("⚠️ Unsupported Telegram file type. Please send a document, video, audio, photo, animation, voice, video note, or sticker.")
+        return
+
+    # Telegram supports a 2 GB practical file ceiling for document uploads.
+    # Make the bot's own guard explicit and configurable via env.
+    if size > cfg.UPLOAD_MAX_FILE_SIZE_BYTES:
+        await message.answer(
+            f"⚠️ This file is too large for the current bot policy: {human_bytes(size)} > {human_bytes(cfg.UPLOAD_MAX_FILE_SIZE_BYTES)}.\n"
+            "Please reduce the file or raise UPLOAD_MAX_FILE_SIZE_BYTES in the environment.",
+            parse_mode="HTML",
+        )
+        return
 
     safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
     safe_filename = safe_filename[:180] if len(safe_filename) > 180 else safe_filename
