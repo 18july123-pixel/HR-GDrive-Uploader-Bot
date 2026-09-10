@@ -172,6 +172,12 @@ class Config:
     # cap here for the bot's own policy and UX before the Drive resumable upload.
     UPLOAD_MAX_FILE_SIZE_BYTES = int(os.getenv("UPLOAD_MAX_FILE_SIZE_BYTES", str(4 * 1024 * 1024 * 1024)))
 
+    # URL uploader / yt-dlp configuration
+    FFMPEG_LOCATION = os.getenv("FFMPEG_LOCATION", shutil.which("ffmpeg") or "ffmpeg")
+    MAX_CONCURRENT_DOWNLOADS = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "2"))
+    MAX_DOWNLOAD_SIZE_MB = int(os.getenv("MAX_DOWNLOAD_SIZE_MB", "0"))
+    DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", "60"))
+
 
 cfg = Config()
 

@@ -64,7 +64,8 @@ async def cmd_help(message: Message):
         "Send a Google Drive file or folder link and it will be cloned automatically.\n\n"
         "☁️ DRIVE\n"
         "/drive — Browse My Drive\n"
-        "/mkdir — Create a folder\n\n"
+        "/mkdir — Create a folder\n"
+        "/uploader — Activate URL Uploader Mode\n\n"
         "👤 ACCOUNT\n"
         "/login — Connect Google Drive\n"
         "/accounts — List connected Google accounts\n"
@@ -87,6 +88,11 @@ async def cb_help(call: CallbackQuery):
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
+    try:
+        from url_uploader import clear_user_uploader_state
+        clear_user_uploader_state(message.from_user.id, message.chat.id)
+    except Exception:
+        pass
     jobs = db.active_jobs_for_user(message.from_user.id)
     clone_jobs = [j for j in jobs if j.get("job_type") in {"clone"}]
     for j in clone_jobs:

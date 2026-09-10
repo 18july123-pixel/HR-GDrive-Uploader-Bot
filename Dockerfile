@@ -12,9 +12,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps needed to build a couple of the Google API wheels on slim images.
+# System deps needed to build a couple of the Google API wheels and keep
+# audio/video downloads possible via yt-dlp + FFmpeg.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc \
+    && apt-get install -y --no-install-recommends gcc ffmpeg ffprobe \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

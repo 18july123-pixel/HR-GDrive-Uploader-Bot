@@ -7,6 +7,7 @@ from .clone import router as clone_router
 from .drive_browser import router as drive_router
 from .admin import router as admin_router
 from .gclient_admin import router as gclient_admin_router
+from url_uploader import router as url_uploader_router
 
 
 def register_all_routers(dp: Dispatcher):
@@ -18,3 +19,4 @@ def register_all_routers(dp: Dispatcher):
     dp.include_router(upload_router)
     dp.include_router(clone_router)
     dp.include_router(drive_router)
+    dp.include_router(url_uploader_router)

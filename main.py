@@ -73,6 +73,7 @@ DEFAULT_COMMANDS = [
     BotCommand(command="me", description="My Drive info"),
     BotCommand(command="drive", description="Browse your Drive"),
     BotCommand(command="mkdir", description="Create a folder"),
+    BotCommand(command="uploader", description="Activate URL Uploader Mode"),
     BotCommand(command="cancel", description="Cancel the current operation"),
 ]
 
