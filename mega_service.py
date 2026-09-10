@@ -107,65 +107,23 @@ def clone_public_link(public_url: str, user_id: int | None = None) -> dict:
     Mega account and return a normalized metadata dict.
 
     This repository uses the Python mega.py SDK, whose public import API is
-    file-oriented. For a public folder URL, the clone flow first detects the
-    folder URL shape and then tries the same import endpoint. If the installed
-    SDK cannot recursively materialize a public folder tree, this helper raises
-    a friendly RuntimeError instead of crashing the bot.
+    file-oriented and does not natively support recursive folder import.
+    Folder-style URLs are detected up front and refused with a clear user
+    message instead of being passed through the file parser, which otherwise
+    raises the misleading 'Url key missing' error.
     """
     client = _client(user_id=user_id)
     url = public_url.strip()
 
-    # Detect file vs folder URL shape before attempting public import.
+    # Mega folder links are shape-detected early. The installed public
+    # import API in mega.py 1.0.8 only understands file URLs and cannot
+    # recursively materialize a folder tree from a public folder URL.
     if _is_folder_public_url(url):
-        # Best effort: try the low-level public folder import route and let
-        # the installed mega.py handle the object if it supports that format.
-        try:
-            imported = client.import_public_url(url)
-        except Exception as exc:
-            raise RuntimeError(
-                "Public Mega folder links require recursive folder import support "
-                "that is not available in the installed mega.py public file import path. "
-                f"Details: {exc}"
-            ) from exc
-
-        # Public folder import can produce either a dict, tuple, list, or a
-        # node object. Read what we can safely and shape it the same way as the
-        # current file metadata response.
-        try:
-            name = None
-            info = client.get_public_url_info(url)
-            if isinstance(info, dict):
-                name = info.get("name")
-        except Exception:
-            name = None
-
-        try:
-            link = client.get_folder_link(imported)
-        except Exception:
-            try:
-                link = client.get_link(imported)
-            except Exception:
-                link = None
-
-        try:
-            if isinstance(imported, dict):
-                file_id = imported.get("h") or imported.get("id") or imported.get("name")
-            elif isinstance(imported, tuple):
-                file_id = imported[0] if imported else None
-            elif isinstance(imported, list):
-                file_id = imported[0].get("h") if imported and isinstance(imported[0], dict) else None
-            else:
-                file_id = getattr(imported, "h", None) or getattr(imported, "id", None)
-        except Exception:
-            file_id = None
-
-        return {
-            "name": name or getattr(imported, "name", None) or os.path.basename(url),
-            "id": str(file_id) if file_id else None,
-            "webViewLink": link or url,
-            "kind": "folder",
-            "imported": True,
-        }
+        raise RuntimeError(
+            "Public Mega folder links require recursive folder import support "
+            "that is not available in the installed mega.py public file import path. "
+            "Use a Mega file public link or upgrade to a Mega SDK with folder import support."
+        )
 
     # File URL branch: support the public Mega file import route cleanly.
     try:

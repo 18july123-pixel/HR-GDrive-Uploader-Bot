@@ -56,7 +56,7 @@ MONGO_DB_NAME - optional MongoDB database name
 MONGO_ENCRYPTION_KEY - optional encryption key for Mongo credential storage
 ```
 
-```
+
 
 Use SQLite by default. If `MONGO_URI` is set, the bot uses MongoDB-backed persistence automatically.
 
