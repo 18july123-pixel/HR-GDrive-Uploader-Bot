@@ -111,13 +111,21 @@ async def cmd_uploader(message: Message):
 
 @router.message(F.text)
 async def handle_url_message(message: Message):
-    """Only consume an http/https URL when the chat/user is in uploader mode."""
+    """Only consume an http/https URL when the chat/user is in uploader mode.
+
+    Ignore slash commands here so `/help`, `/cancel`, `/uploader`, or other
+    command text does not poison uploader waiting state with an invalid URL
+    error and accidentally clear the URL capture state for the user.
+    """
     if not message.text:
+        return
+    text = message.text.strip()
+    if text.startswith("/"):
         return
     key = (message.from_user.id, message.chat.id)
     if key not in uploader_mode:
         return
-    url = message.text.strip()
+    url = text
     if not validate_http_url(url):
         await message.answer("❌ Invalid or unsafe URL. Send a valid http:// or https:// URL only.")
         del uploader_mode[key]
@@ -188,6 +196,11 @@ async def callback_uploader_action(call: CallbackQuery):
 @router.message(F.text)
 async def handle_rename_input(message: Message):
     """Rename waiting state captured in memory for the same chat/user pair."""
+    if not message.text:
+        return
+    text = message.text.strip()
+    if text.startswith("/"):
+        return
     key = (message.from_user.id, message.chat.id)
     job_id = rename_waiting.get(key)
     if not job_id:
@@ -196,7 +209,7 @@ async def handle_rename_input(message: Message):
     if not job or job.get("user_id") != message.from_user.id:
         return
     # decide if the entered name is safe
-    raw = message.text.strip()
+    raw = text
     clean_name = sanitize_file_stem(raw)
     if clean_name in {"", "download"} or any(token in clean_name.lower() for token in ("../", "..\\", "<", ">", "/bin/", "shell", "sudo", "rm -")):
         await message.answer("❌ Invalid filename. Please choose a safe name.")
