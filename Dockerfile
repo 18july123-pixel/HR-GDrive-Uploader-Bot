@@ -13,9 +13,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # System deps needed to build a couple of the Google API wheels and keep
-# audio/video downloads possible via yt-dlp + FFmpeg.
+# audio/video downloads possible via yt-dlp + FFmpeg. On Debian/Ubuntu,
+# the ffmpeg package provides both ffmpeg and ffprobe binaries.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc ffmpeg ffprobe \
+    && apt-get install -y --no-install-recommends gcc ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
