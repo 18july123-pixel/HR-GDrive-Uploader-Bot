@@ -77,7 +77,6 @@ def file_actions(file_id: str) -> InlineKeyboardMarkup:
     )
     b.row(
         InlineKeyboardButton(text="🔗 Open Link", callback_data=f"drive:link:{file_id}"),
-        InlineKeyboardButton(text="📥 Export", callback_data=f"drive:export:{file_id}"),
     )
     return b.as_markup()
 

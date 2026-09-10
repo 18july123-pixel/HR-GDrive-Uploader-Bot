@@ -49,12 +49,13 @@ async def _show_folder(message: Message, token: dict, folder_id: str, state: FSM
 
 @router.message(Command("drive"))
 async def cmd_drive(message: Message, state: FSMContext):
-    user = await _ensure_connected(message)
-    if not user:
+    user = db.get_user(message.from_user.id)
+    token = db.get_google_token(message.from_user.id)
+    if not user or not token:
+        await message.answer("☁️ Connect your Google Drive first with /login.")
         return
     await state.set_state(DriveStates.browsing)
     await state.update_data(stack=[], current="root", forward=[])
-    token = json.loads(user["google_token"])
     await _show_folder(message, token, "root", state)
 
 
@@ -193,10 +194,11 @@ async def receive_mkdir_name(message: Message, state: FSMContext):
     data = await state.get_data()
     parent_id = data.get("mkdir_parent", "root")
     await state.set_state(DriveStates.browsing)
-    user = await _ensure_connected(message)
-    if not user:
+    user = db.get_user(message.from_user.id)
+    token = db.get_google_token(message.from_user.id)
+    if not user or not token:
+        await message.answer("☁️ Connect your Google Drive first with /login.")
         return
-    token = json.loads(user["google_token"])
     created = drive_service.mkdir(token, message.text.strip(), parent_id)
     db.log_action(message.from_user.id, "mkdir", created["name"])
     await message.answer(f"✅ Folder created: {created['name']}")
@@ -205,13 +207,14 @@ async def receive_mkdir_name(message: Message, state: FSMContext):
 
 @router.message(Command("mkdir"))
 async def cmd_mkdir(message: Message, command: CommandObject):
-    user = await _ensure_connected(message)
-    if not user:
+    user = db.get_user(message.from_user.id)
+    token = db.get_google_token(message.from_user.id)
+    if not user or not token:
+        await message.answer("☁️ Connect your Google Drive first with /login.")
         return
     if not command.args:
         await message.answer("Usage: /mkdir [folder name]")
         return
-    token = json.loads(user["google_token"])
     parent_id = user.get("default_folder_id") or "root"
     created = drive_service.mkdir(token, command.args.strip(), parent_id)
     db.log_action(message.from_user.id, "mkdir", created["name"])
