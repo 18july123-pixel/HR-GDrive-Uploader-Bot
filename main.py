@@ -71,12 +71,7 @@ DEFAULT_COMMANDS = [
     BotCommand(command="useaccount", description="Choose the default upload account"),
     BotCommand(command="logout", description="Disconnect your Google Drive"),
     BotCommand(command="me", description="My Drive info"),
-    BotCommand(command="drive", description="Browse your Drive"),
     BotCommand(command="mkdir", description="Create a folder"),
-    BotCommand(command="rename", description="Rename a file/folder"),
-    BotCommand(command="delete", description="Delete a file/folder"),
-    BotCommand(command="restore", description="Restore a trashed file/folder"),
-    BotCommand(command="link", description="Get a shareable link"),
     BotCommand(command="cancel", description="Cancel the current operation"),
 ]
 

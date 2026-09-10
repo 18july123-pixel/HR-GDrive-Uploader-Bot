@@ -153,7 +153,6 @@ class Config:
 
     # Limits
     FREE_UPLOAD_LIMIT_GB = float(os.getenv("FREE_UPLOAD_LIMIT_GB", "4"))
-    PREMIUM_UPLOAD_LIMIT_GB = float(os.getenv("PREMIUM_UPLOAD_LIMIT_GB", "50"))
 
     # Duplicate detection
     DUPLICATE_CHECK_ENABLED = os.getenv("DUPLICATE_CHECK_ENABLED", "true").lower() == "true"

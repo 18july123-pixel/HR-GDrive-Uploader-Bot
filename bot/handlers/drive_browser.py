@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 import database as db
 import drive_service
 from utils import html_link, human_bytes, safe_answer, user_message
-from bot.keyboards import drive_browser, file_actions, delete_confirm, share_menu
+from bot.keyboards import drive_browser, file_actions, share_menu
 from bot.states import DriveStates
 
 router = Router()
@@ -41,6 +41,8 @@ async def _show_folder(message: Message, token: dict, folder_id: str, state: FSM
         except Exception:
             pass
     await message.answer(text, reply_markup=kb)
+
+
 
 
 @router.message(Command("drive"))
@@ -207,54 +209,7 @@ async def cmd_mkdir(message: Message, command: CommandObject):
     await message.answer(f"✅ Folder created: {created['name']}")
 
 
-# ---------- rename / move / copy / delete / link (triggered from file_actions keyboard) ----------
-
-@router.callback_query(F.data.startswith("drive:rename:"))
-async def cb_rename_start(call: CallbackQuery, state: FSMContext):
-    file_id = call.data.split(":")[-1]
-    await state.set_state(DriveStates.waiting_rename)
-    await state.update_data(rename_id=file_id)
-    await call.message.answer("✏️ Send the new name.")
-    await safe_answer(call)
-
-
-@router.message(DriveStates.waiting_rename)
-async def receive_rename(message: Message, state: FSMContext):
-    data = await state.get_data()
-    file_id = data.get("rename_id")
-    await state.clear()
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    token = json.loads(user["google_token"])
-    result = drive_service.rename(token, file_id, message.text.strip())
-    link = drive_service.get_file_link(token, file_id)
-    db.log_action(message.from_user.id, "rename", result["name"])
-    await message.answer(
-        f"✅ Renamed to: {html_link(result['name'], link)}",
-        parse_mode="HTML",
-    )
-
-
-@router.callback_query(F.data.startswith("drive:delete_confirm:"))
-async def cb_delete_confirm(call: CallbackQuery):
-    file_id = call.data.split(":")[-1]
-    await call.message.answer("🗑️ Are you sure you want to delete this?", reply_markup=delete_confirm(file_id))
-    await safe_answer(call)
-
-
-@router.callback_query(F.data.startswith("drive:delete:"))
-async def cb_delete(call: CallbackQuery):
-    file_id = call.data.split(":")[-1]
-    token = db.get_google_token(call.from_user.id)
-    if not token:
-        await safe_answer(call, "☁️ Connect your Google Drive first with /login.", show_alert=True)
-        return
-    drive_service.trash(token, file_id)
-    db.log_action(call.from_user.id, "trash", file_id)
-    await call.message.edit_text("🗑️ Moved to Trash. Use /restore [file link or ID] to restore it.")
-    await safe_answer(call)
-
+# ---------- link / share surface only ----------
 
 @router.callback_query(F.data.startswith("drive:cancel:"))
 async def cb_drive_cancel(call: CallbackQuery):
@@ -333,59 +288,5 @@ async def cb_share_role(call: CallbackQuery):
 
 
 
-@router.message(Command("rename"))
-async def cmd_rename(message: Message, command: CommandObject, state: FSMContext):
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    if not command.args:
-        await message.answer("Usage: /rename [file link or ID]\nThen send the new name when asked.")
-        return
-    file_id = drive_service.extract_id_from_link(command.args.strip())
-    if not file_id:
-        await message.answer("❌ Couldn't parse that as a Drive link/ID.")
-        return
-    await state.set_state(DriveStates.waiting_rename)
-    await state.update_data(rename_id=file_id)
-    await message.answer("✏️ Send the new name.")
-
-
-
-
-@router.message(Command("delete"))
-async def cmd_delete(message: Message, command: CommandObject):
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    if not command.args:
-        await message.answer("Usage: /delete [file link or ID]")
-        return
-    file_id = drive_service.extract_id_from_link(command.args.strip())
-    if not file_id:
-        await message.answer("❌ Couldn't parse that as a Drive link/ID.")
-        return
-    await message.answer("🗑️ Are you sure you want to delete this?", reply_markup=delete_confirm(file_id))
-
-
-@router.message(Command("restore"))
-async def cmd_restore(message: Message, command: CommandObject):
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    if not command.args:
-        await message.answer("Usage: /restore [file or folder link]")
-        return
-    file_id = drive_service.extract_id_from_link(command.args.strip())
-    if not file_id:
-        await message.answer("❌ Couldn't parse that as a Drive file or folder link.")
-        return
-    token = json.loads(user["google_token"])
-    try:
-        await asyncio.to_thread(drive_service.restore, token, file_id)
-    except Exception as exc:
-        await message.answer(f"❌ Restore failed: {exc}")
-        return
-    db.log_action(message.from_user.id, "restore", file_id)
-    await message.answer("✅ Item restored from Trash.")
 
 

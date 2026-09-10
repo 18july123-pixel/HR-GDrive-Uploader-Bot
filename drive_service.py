@@ -15,6 +15,15 @@ from google.oauth2.credentials import Credentials as GoogleCredentials
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
+MIME_TYPE_DESCRIPTIONS = {
+    "application/vnd.google-apps.document": "Google Docs",
+    "application/vnd.google-apps.drive-sdk": "Third-party shortcut",
+    "application/vnd.google-apps.file": "Google Drive file",
+    "application/vnd.google-apps.folder": "Google Drive folder",
+    "application/vnd.google-apps.form": "Google Forms",
+    "application/vnd.google-apps.spreadsheet": "Google Sheets",
+}
+
 NATIVE_FILE_VIEW_URLS = {
     "application/vnd.google-apps.document": "https://docs.google.com/document/d/{}/edit",
     "application/vnd.google-apps.spreadsheet": "https://docs.google.com/spreadsheets/d/{}/edit",
@@ -470,9 +479,9 @@ def get_sharing_status(user_token: dict, file_id: str) -> dict:
 def get_google_workspace_file_url(file_id: str, mime_type: str | None = None) -> str:
     """Return the canonical native Google Docs/Sheets/Slides/Forms URL.
 
-    This helper is deliberately simple and pure: it uses the existing native
-    workspace URL template catalog already embedded in the repo and lets the
-    bot turn a Drive file ID into a stable docs/sheets/presentation URL.
+    Build a stable URL without routing the user through the generic Drive
+    open endpoint, which is known to be unreliable for Docs/Sheets driven
+    from the browser and Telegram deep-link context.
     """
     template = NATIVE_FILE_VIEW_URLS.get(mime_type or "")
     if template:
@@ -491,22 +500,29 @@ def get_doc_url(file_id: str) -> str:
 
 
 def fetch_workspace_url(user_token: dict, file_id: str) -> str:
-    """Fetch a Google native Workspace URL from the Drive API metadata.
+    """Return the safest Google Workspace edit/view URL for a Drive file.
 
-    The bot can then display an edit URL for Sheets or Docs without forcing
-    a download/export conversion. This is the smoother URL fetch path we want
-    for the Google Workspace-only objects in the repo.
+    Prefer the metadata's native webViewLink for Docs/Sheets/Slides/etc.
+    and only fall back to the canonical Google Workspace template map if
+    Drive metadata omits the view link. This follows the REST file metadata
+    contract documented by Google Workspace APIs and avoids the broken
+    generic open URL path that causes Sheets/Docs open failures.
     """
     with _handle_drive_errors(f"getting a workspace URL for '{file_id}'"):
         drive = get_drive(user_token)
         f = drive.files().get(
             fileId=file_id,
             fields="id, mimeType, webViewLink, webContentLink",
+            supportsAllDrives=True,
         ).execute(num_retries=3)
+        mime_type = f.get("mimeType")
+        # Native Google Objects always prefer their metadata webViewLink.
+        if mime_type in NATIVE_FILE_VIEW_URLS:
+            return f.get("webViewLink") or get_google_workspace_file_url(file_id, mime_type)
+        # For normal Drive files, a shared file link is the best view URL.
         link = f.get("webViewLink") or f.get("webContentLink")
         if link:
             return link
-        mime_type = f.get("mimeType")
         return get_google_workspace_file_url(file_id, mime_type)
 
 

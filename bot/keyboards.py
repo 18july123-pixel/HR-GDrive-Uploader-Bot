@@ -42,7 +42,6 @@ def duplicate_confirm(job_id: str) -> InlineKeyboardMarkup:
 def help_menu() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(
-        InlineKeyboardButton(text="☁️ My Drive", callback_data="menu:drive"),
         InlineKeyboardButton(text="👤 My Account", callback_data="menu:account"),
     )
     return b.as_markup()
@@ -73,14 +72,12 @@ def drive_browser(
 def file_actions(file_id: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(
-        InlineKeyboardButton(text="✏️ Rename", callback_data=f"drive:rename:{file_id}"),
         InlineKeyboardButton(text="🔒 Sharing", callback_data=f"drive:share:{file_id}"),
     )
     b.row(
         InlineKeyboardButton(text="🔗 Open Link", callback_data=f"drive:link:{file_id}"),
         InlineKeyboardButton(text="📥 Export", callback_data=f"drive:export:{file_id}"),
     )
-    b.row(InlineKeyboardButton(text="🗑️ Delete", callback_data=f"drive:delete_confirm:{file_id}"))
     return b.as_markup()
 
 
@@ -106,15 +103,6 @@ def share_menu(file_id: str, status: dict) -> InlineKeyboardMarkup:
         )
 
     b.row(InlineKeyboardButton(text="⬅️ Back", callback_data=f"drive:open:{file_id}"))
-    return b.as_markup()
-
-
-def delete_confirm(file_id: str) -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.row(
-        InlineKeyboardButton(text="🗑️ Move to Trash", callback_data=f"drive:delete:{file_id}"),
-        InlineKeyboardButton(text="❌ Cancel", callback_data=f"drive:cancel:{file_id}"),
-    )
     return b.as_markup()
 
 

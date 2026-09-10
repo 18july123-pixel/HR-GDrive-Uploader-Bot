@@ -12,7 +12,6 @@ class CloneStates(StatesGroup):
 
 class DriveStates(StatesGroup):
     waiting_mkdir_name = State()
-    waiting_rename = State()
     browsing = State()
 
 

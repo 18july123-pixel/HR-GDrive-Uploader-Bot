@@ -61,7 +61,7 @@ def _ensure_mongo():
     return _client, _db
 
 _ALLOWED_USER_FIELDS = {
-    "default_folder_id", "is_banned", "is_premium",
+    "default_folder_id", "is_banned",
 }
 _ALLOWED_JOB_FIELDS = {
     "status", "progress", "bytes_total", "bytes_done", "error", "dest_folder_id",
@@ -88,7 +88,7 @@ def upsert_user(user_id: int, username: str | None):
         {"user_id": user_id},
         {"$set": {"username": username}, "$setOnInsert": {
             "user_id": user_id, "created_at": now,
-            "is_banned": 0, "is_premium": 0,
+            "is_banned": 0,
             "uploads_count": 0, "clones_count": 0,
             "uploaded_bytes": 0, "cloned_bytes": 0,
         }},

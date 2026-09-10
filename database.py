@@ -41,7 +41,6 @@ def init_db():
                 google_email TEXT,
                 google_token TEXT,          -- JSON blob of OAuth credentials
                 is_banned INTEGER DEFAULT 0,
-                is_premium INTEGER DEFAULT 0,
                 default_folder_id TEXT,
                 uploads_count INTEGER DEFAULT 0,
                 clones_count INTEGER DEFAULT 0,
@@ -217,7 +216,7 @@ def get_google_token(user_id: int):
 
 def update_user_field(user_id: int, field: str, value):
     allowed = {
-        "default_folder_id", "is_banned", "is_premium",
+        "default_folder_id", "is_banned",
     }
     if field not in allowed:
         raise ValueError(f"Field not allowed: {field}")
