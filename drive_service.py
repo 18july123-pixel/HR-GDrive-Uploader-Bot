@@ -467,8 +467,37 @@ def get_sharing_status(user_token: dict, file_id: str) -> dict:
         return {"access": "restricted", "role": None, "permission_id": None}
 
 
-def get_file_link(user_token: dict, file_id: str) -> str:
-    with _handle_drive_errors(f"getting a link for '{file_id}'"):
+def get_google_workspace_file_url(file_id: str, mime_type: str | None = None) -> str:
+    """Return the canonical native Google Docs/Sheets/Slides/Forms URL.
+
+    This helper is deliberately simple and pure: it uses the existing native
+    workspace URL template catalog already embedded in the repo and lets the
+    bot turn a Drive file ID into a stable docs/sheets/presentation URL.
+    """
+    template = NATIVE_FILE_VIEW_URLS.get(mime_type or "")
+    if template:
+        return template.format(file_id)
+    return f"https://drive.google.com/open?id={file_id}"
+
+
+def get_sheet_url(file_id: str) -> str:
+    """Return the canonical Google Sheets edit URL from a spreadsheet file ID."""
+    return NATIVE_FILE_VIEW_URLS["application/vnd.google-apps.spreadsheet"].format(file_id)
+
+
+def get_doc_url(file_id: str) -> str:
+    """Return the canonical Google Docs edit URL from a document file ID."""
+    return NATIVE_FILE_VIEW_URLS["application/vnd.google-apps.document"].format(file_id)
+
+
+def fetch_workspace_url(user_token: dict, file_id: str) -> str:
+    """Fetch a Google native Workspace URL from the Drive API metadata.
+
+    The bot can then display an edit URL for Sheets or Docs without forcing
+    a download/export conversion. This is the smoother URL fetch path we want
+    for the Google Workspace-only objects in the repo.
+    """
+    with _handle_drive_errors(f"getting a workspace URL for '{file_id}'"):
         drive = get_drive(user_token)
         f = drive.files().get(
             fileId=file_id,
@@ -477,8 +506,37 @@ def get_file_link(user_token: dict, file_id: str) -> str:
         link = f.get("webViewLink") or f.get("webContentLink")
         if link:
             return link
-
         mime_type = f.get("mimeType")
+        return get_google_workspace_file_url(file_id, mime_type)
+
+
+def get_file_link(user_token: dict, file_id: str) -> str:
+    """Return a user-clickable file URL for Drive, Docs, Sheets, Slides, Forms,
+    and other native Google Workspace objects.
+
+    Native Google Workspace files must not be forced through the generic
+    Drive file-content export view. If Drive metadata exposes a webViewLink,
+    that is the best canonical link. Otherwise, fall back to the per-mime
+    template map already used by the repository.
+    """
+    with _handle_drive_errors(f"getting a link for '{file_id}'"):
+        drive = get_drive(user_token)
+        f = drive.files().get(
+            fileId=file_id,
+            fields="id, mimeType, webViewLink, webContentLink",
+            supportsAllDrives=True,
+        ).execute(num_retries=3)
+        mime_type = f.get("mimeType")
+        # Prefer the Google Workspace native edit/view URL if the file is a
+        # native Google object. That resolves the Sheets/Docs click issue more
+        # cleanly than the generic Drive download/view fallback.
+        if mime_type in NATIVE_FILE_VIEW_URLS:
+            return f.get("webViewLink") or get_google_workspace_file_url(file_id, mime_type)
+
+        link = f.get("webViewLink") or f.get("webContentLink")
+        if link:
+            return link
+
         template = NATIVE_FILE_VIEW_URLS.get(mime_type)
         if template:
             return template.format(file_id)

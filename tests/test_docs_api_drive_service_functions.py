@@ -21,3 +21,10 @@ def test_drive_service_docs_and_sheets_helpers_have_expected_http_shape():
     assert inspect.signature(drive_service.batch_update_document).parameters
     assert inspect.signature(drive_service.update_spreadsheet_values).parameters
     assert inspect.signature(drive_service.clear_spreadsheet_values).parameters
+
+
+def test_drive_service_workspace_url_helpers_are_public_and_resolvable():
+    assert hasattr(drive_service, "get_google_workspace_file_url")
+    assert hasattr(drive_service, "get_sheet_url")
+    assert hasattr(drive_service, "get_doc_url")
+    assert hasattr(drive_service, "fetch_workspace_url")

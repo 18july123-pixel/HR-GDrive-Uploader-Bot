@@ -80,12 +80,6 @@ DEFAULT_COMMANDS = [
     BotCommand(command="delete", description="Delete a file/folder"),
     BotCommand(command="restore", description="Restore a trashed file/folder"),
     BotCommand(command="link", description="Get a shareable link"),
-    BotCommand(command="search", description="Search your Drive"),
-    BotCommand(command="stats", description="My usage statistics"),
-    BotCommand(command="usage", description="Today's usage"),
-    BotCommand(command="limits", description="My current limits"),
-    BotCommand(command="plan", description="My subscription plan"),
-    BotCommand(command="status", description="Active jobs"),
     BotCommand(command="cancel", description="Cancel the current operation"),
     BotCommand(command="cancelclone", description="Cancel active clone jobs"),
 ]

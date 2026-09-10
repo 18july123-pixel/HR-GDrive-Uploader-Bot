@@ -2,6 +2,7 @@ import json
 import asyncio
 import time
 import re
+import logging
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
@@ -15,6 +16,7 @@ from bot.keyboards import clone_confirm
 from bot.states import CloneStates
 
 router = Router()
+log = logging.getLogger("gdrive_bot")
 
 
 def detect_provider(link: str) -> str | None:
@@ -55,100 +57,19 @@ async def receive_clone_link(message: Message, state: FSMContext):
 
 
 async def _process_clone_link(message: Message, user: dict | None | None, link: str):
+    link = (link or "").strip()
+    file_id = drive_service.extract_id_from_link(link)
     provider = detect_provider(link)
-    if provider == "drive":
-        if not user or not user.get("google_token"):
-            await message.answer("☁️ Connect your Google Drive first with /login.")
-            return
-        await message.answer("🔍 Detecting link...\n☁️ Google Drive link detected\n📁 Cloning...")
-        token = json.loads(user["google_token"])
-        try:
-            meta = await asyncio.to_thread(drive_service.get_file_meta, token, drive_service.extract_id_from_link(link.strip()))
-        except Exception as e:
-            await message.answer(f"❌ Couldn't access that Drive item: {e}")
-            return
 
-        is_folder = meta["mimeType"] == "application/vnd.google-apps.folder"
-        try:
-            destination_id = await asyncio.to_thread(
-                drive_service.ensure_default_folder, user, token
-            )
-        except Exception as exc:
-            await message.answer(f"❌ Couldn't prepare the HR Gdrive folder: {exc}")
-            return
-
-        try:
-            duplicate = await asyncio.to_thread(
-                drive_service.find_duplicate_in_folder,
-                token, destination_id, meta["name"], meta["mimeType"],
-                int(meta.get("size", 0) or 0) if not is_folder else None,
-            )
-        except Exception:
-            log.exception("Clone duplicate check failed for %s", drive_service.extract_id_from_link(link.strip()))
-            duplicate = None
-        if duplicate:
-            try:
-                duplicate_link = await asyncio.to_thread(
-                    drive_service.get_file_link, token, duplicate["id"]
-                )
-            except Exception:
-                duplicate_link = duplicate.get("webViewLink")
-            await message.answer(
-                "⚠️ Duplicate detected in HR Gdrive.\n\n"
-                f"📄 {html_link(duplicate['name'], duplicate_link)}\n"
-                "Nothing was cloned.",
-                parse_mode="HTML",
-            )
-            return
-
-        job_id = db.create_job(message.from_user.id, "clone", link.strip(), destination_id)
-
-        if is_folder:
-            status = await message.answer("🔍 Scanning folder contents...")
-            scan_started = time.monotonic()
-            scan_loop = asyncio.get_running_loop()
-
-            def scan_progress(files, folders):
-                asyncio.run_coroutine_threadsafe(
-                    safe_edit_text(
-                        status,
-                        f"🔍 Scanning folder contents...\n"
-                        f"📄 Files: {files}  📂 Folders: {folders}\n"
-                        f"Elapsed: {format_duration(time.monotonic() - scan_started)}",
-                    ),
-                    scan_loop,
-                )
-
-            try:
-                files, folders, total_bytes = await asyncio.to_thread(
-                    drive_service.count_folder_contents, token, drive_service.extract_id_from_link(link.strip()), scan_progress
-                )
-            except Exception as exc:
-                db.update_job(job_id, status="error", error=str(exc))
-                await status.edit_text(f"❌ Couldn't scan that folder: {exc}")
-                return
-            db.update_job(job_id, bytes_total=total_bytes)
-            text = (
-                "🔗 Drive Folder Found\n\n"
-                f"📁 {meta['name']}\n"
-                f"📄 {files} Files\n"
-                f"📂 {folders} Folders\n"
-                f"💾 {human_bytes(total_bytes)}"
-            )
-            await status.edit_text(text, reply_markup=clone_confirm(str(job_id)))
-        else:
-            size = int(meta.get("size", 0) or 0)
-            db.update_job(job_id, bytes_total=size)
-            text = f"🔗 Drive File Found\n\n📄 {meta['name']}\n💾 {human_bytes(size)}"
-            await message.answer(text, reply_markup=clone_confirm(str(job_id)))
+    if provider != "drive" or not file_id:
+        await message.answer("❌ Unsupported link. Please provide a Google Drive link.")
         return
 
-    await message.answer("❌ Unsupported link. Please provide a Google Drive link.")
-
-    if not file_id:
-        await message.answer("❌ Couldn't parse a Drive link/ID from that. Please send a valid Drive link.")
+    if not user or not user.get("google_token"):
+        await message.answer("☁️ Connect your Google Drive first with /login.")
         return
 
+    await message.answer("🔍 Detecting link...\n☁️ Google Drive link detected\n📁 Cloning...")
     token = json.loads(user["google_token"])
     try:
         meta = await asyncio.to_thread(drive_service.get_file_meta, token, file_id)
@@ -189,7 +110,7 @@ async def _process_clone_link(message: Message, user: dict | None | None, link: 
         )
         return
 
-    job_id = db.create_job(message.from_user.id, "clone", link.strip(), destination_id)
+    job_id = db.create_job(message.from_user.id, "clone", link, destination_id)
 
     if is_folder:
         status = await message.answer("🔍 Scanning folder contents...")

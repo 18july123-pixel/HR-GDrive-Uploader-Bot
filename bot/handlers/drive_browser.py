@@ -385,6 +385,31 @@ async def cmd_copy(message: Message, command: CommandObject):
         destination_id = await asyncio.to_thread(
             drive_service.ensure_default_folder, user, token
         )
+
+        size = None if meta.get("mimeType") == FOLDER_MIME else int(meta.get("size", 0) or 0)
+        duplicate = await asyncio.to_thread(
+            drive_service.find_duplicate_in_folder,
+            token,
+            destination_id,
+            meta.get("name", ""),
+            meta.get("mimeType"),
+            size,
+        )
+        if duplicate:
+            try:
+                duplicate_link = await asyncio.to_thread(
+                    drive_service.get_file_link, token, duplicate["id"]
+                )
+            except Exception:
+                duplicate_link = duplicate.get("webViewLink")
+            await message.answer(
+                "⚠️ Duplicate detected in HR Gdrive.\n\n"
+                f"📄 {html_link(duplicate['name'], duplicate_link)}\n"
+                "Nothing was copied.",
+                parse_mode="HTML",
+            )
+            return
+
         if meta["mimeType"] == FOLDER_MIME:
             result = await asyncio.to_thread(
                 drive_service.clone_item, token, source_id, destination_id
