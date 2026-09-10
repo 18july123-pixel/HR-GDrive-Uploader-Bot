@@ -233,12 +233,6 @@ async def cancel_job(job_id: str):
     uploader_jobs.pop(job_id, None)
 
 
-# Compatibility alias for the callback path that wants to invoke the
-# existing yt-dlp download pipeline through the named job function.
-async def start_download_job(job_id: str, status_message: Message | CallbackQuery, rename_name: str | None):
-    await start_download(job_id, status_message, rename_name)
-
-
 async def start_download(job_id: str, status_message: Message | CallbackQuery, rename_name: str | None):
     """Download a URL using yt-dlp and upload the final file to Telegram."""
     job = uploader_jobs.get(job_id)
@@ -346,6 +340,11 @@ async def start_download(job_id: str, status_message: Message | CallbackQuery, r
             except Exception:
                 log.warning("Could not clean up URL uploader job temp dir %s", temp_dir, exc_info=True)
             uploader_jobs.pop(job_id, None)
+
+
+# Compatibility alias for the callback path that wants to invoke the
+# existing yt-dlp download pipeline through the named job function.
+start_download_job = start_download
 
 
 async def send_download_to_telegram(job: dict, final_path: str, status_msg: Message):
