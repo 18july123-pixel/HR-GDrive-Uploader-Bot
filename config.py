@@ -114,7 +114,7 @@ class Config:
     # explicitly set (see _detect_public_base_url above).
     WEBHOOK_BASE_URL = _detect_public_base_url()
     WEBHOOK_BASE_URL_SOURCE = (
-        "explicit env var" if os.getenv("WEBHOOK_BASE_URL", "").strip()
+        "explicit env var" if os.getenv("WEBHOOK_BASE_URL", "https://hr-gdrive-uploader-bot-production.up.railway.app").strip()
         else "auto-detected" if WEBHOOK_BASE_URL
         else "not found"
     )
@@ -132,7 +132,7 @@ class Config:
 
     # Must match a redirect URI configured in Google Cloud Console. Auto-built
     # from the detected public URL when not explicitly set.
-    OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip() or (
+    OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "https://hr-gdrive-uploader-bot-production.up.railway.app/oauth/callback").strip() or (
         f"{WEBHOOK_BASE_URL}/oauth/callback" if WEBHOOK_BASE_URL
         else "http://localhost:8080/oauth/callback"
     )
