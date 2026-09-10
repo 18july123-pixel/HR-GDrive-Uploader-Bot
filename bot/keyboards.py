@@ -45,6 +45,9 @@ def help_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="☁️ My Drive", callback_data="menu:drive"),
         InlineKeyboardButton(text="👤 My Account", callback_data="menu:account"),
     )
+    b.row(
+        InlineKeyboardButton(text="🔗 Uploader", callback_data="menu:uploader"),
+    )
     return b.as_markup()
 
 

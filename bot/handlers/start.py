@@ -103,6 +103,13 @@ async def cmd_cancel(message: Message, state: FSMContext):
         await message.answer("❌ Cancelled current operation.")
 
 
+@router.callback_query(F.data == "menu:uploader")
+async def cb_uploader(call: CallbackQuery):
+    from url_uploader import cmd_uploader
+    await cmd_uploader(call.message)
+    await safe_answer(call)
+
+
 @router.callback_query(F.data == "menu:account")
 async def cb_account(call: CallbackQuery):
     from .auth import cmd_me
