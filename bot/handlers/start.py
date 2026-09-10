@@ -66,23 +66,17 @@ async def cmd_help(message: Message):
         "/drive — Browse Drive\n"
         "/mkdir — Create a folder\n"
         "/rename — Rename an item\n"
-        "/copy — Copy a file or folder to HR Gdrive\n"
         "/delete — Move an item to Trash\n"
         "/restore — Restore a trashed item\n"
-        "/link — Get a file link\n"
-        "/search — Search Drive\n\n"
+        "/link — Get a file link\n\n"
         "👤 ACCOUNT\n"
         "/login — Connect Google Drive\n"
         "/accounts — List connected Google accounts\n"
         "/useaccount — Choose upload account\n"
         "/logout — Disconnect Drive\n"
-        "/me — My Drive information\n"
-        "/stats — My statistics\n"
-        "/plan — Subscription\n\n"
+        "/me — My Drive information\n\n"
         "⚙️ OTHER\n"
-        "/status — Active jobs\n"
         "/cancel — Cancel operation\n"
-        "/cancelclone — Cancel active clone jobs\n"
         "/help — This menu"
     )
     await message.answer(text, reply_markup=help_menu())
@@ -97,22 +91,14 @@ async def cb_help(call: CallbackQuery):
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Cancelled current operation.")
-
-
-@router.message(Command("status"))
-async def cmd_status(message: Message):
     jobs = db.active_jobs_for_user(message.from_user.id)
-    if not jobs:
-        await message.answer("✅ No active jobs right now.\n\nUse /help to see available commands.")
-        return
-    lines = ["📊 ACTIVE JOBS\n"]
-    for j in jobs:
-        lines.append(
-            f"#{j['job_id']} {j['job_type'].upper()} — {j['status']} "
-            f"({j.get('progress', 0):.0f}%)\n{j['source'][:60]}"
-        )
-    await message.answer("\n\n".join(lines) + "\n\nUse /help to see available commands.")
+    clone_jobs = [j for j in jobs if j.get("job_type") in {"clone"}]
+    for j in clone_jobs:
+        db.update_job(j["job_id"], status="cancelled")
+    if clone_jobs:
+        await message.answer(f"❌ Cancelled current operation and {len(clone_jobs)} active clone job(s).")
+    else:
+        await message.answer("❌ Cancelled current operation.")
 
 
 @router.callback_query(F.data == "menu:account")

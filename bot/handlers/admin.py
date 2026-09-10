@@ -215,29 +215,6 @@ async def cmd_driveinfo(message: Message, command: CommandObject):
     )
 
 
-@router.message(Command("jobs"))
-async def cmd_jobs(message: Message):
-    jobs = db.all_active_jobs()
-    if not jobs:
-        await message.answer("No active jobs.")
-        return
-    lines = [f"#{j['job_id']} user={j['user_id']} {j['job_type']} {j['status']} {j.get('progress', 0):.0f}%" for j in jobs[:50]]
-    await message.answer(f"⚙️ ACTIVE JOBS ({len(jobs)})\n\n" + "\n".join(lines))
-
-
-@router.message(Command("logs"))
-async def cmd_logs(message: Message):
-    logs = db.recent_logs(30)
-    if not logs:
-        await message.answer("No activity logged yet.")
-        return
-    lines = []
-    for l in logs:
-        ts = time.strftime("%d %b %H:%M", time.localtime(l["created_at"]))
-        lines.append(f"[{ts}] {l['user_id']} — {l['action']} {l['detail'][:30]}")
-    await message.answer("📜 RECENT LOGS\n\n" + "\n".join(lines))
-
-
 @router.message(Command("bot_on"))
 async def cmd_bot_on(message: Message):
     db.set_state("bot_enabled", "1")

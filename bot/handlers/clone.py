@@ -50,6 +50,15 @@ async def cmd_clone(message: Message, command: CommandObject, state: FSMContext)
     await _process_clone_link(message, db.get_user(message.from_user.id), link)
 
 
+@router.message(Command("copy"))
+async def cmd_copy_alias(message: Message, command: CommandObject, state: FSMContext):
+    """Backward-compatibility alias: treat `/copy` as the same Drive-link
+    duplication entry point as `/clone`. This unifies both command flows into
+    one command surface while keeping the older command spelling alive.
+    """
+    await cmd_clone(message, command, state)
+
+
 @router.message(CloneStates.waiting_link)
 async def receive_clone_link(message: Message, state: FSMContext):
     await state.clear()
@@ -256,13 +265,3 @@ async def cb_clone_cancel(call: CallbackQuery):
 async def cb_menu_clone(call: CallbackQuery, state: FSMContext):
     await cmd_clone(user_message(call), CommandObject(command="clone", args=None), state)
     await safe_answer(call)
-
-
-@router.message(Command("cancelclone"))
-async def cmd_cancelclone(message: Message, state: FSMContext):
-    await state.clear()
-    jobs = db.active_jobs_for_user(message.from_user.id)
-    clone_jobs = [j for j in jobs if j["job_type"] == "clone"]
-    for j in clone_jobs:
-        db.update_job(j["job_id"], status="cancelled")
-    await message.answer(f"❌ Cancelled {len(clone_jobs)} active clone job(s).")

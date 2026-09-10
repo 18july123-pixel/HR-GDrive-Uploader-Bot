@@ -76,12 +76,10 @@ DEFAULT_COMMANDS = [
     BotCommand(command="drive", description="Browse your Drive"),
     BotCommand(command="mkdir", description="Create a folder"),
     BotCommand(command="rename", description="Rename a file/folder"),
-    BotCommand(command="copy", description="Copy a file or folder to HR Gdrive"),
     BotCommand(command="delete", description="Delete a file/folder"),
     BotCommand(command="restore", description="Restore a trashed file/folder"),
     BotCommand(command="link", description="Get a shareable link"),
     BotCommand(command="cancel", description="Cancel the current operation"),
-    BotCommand(command="cancelclone", description="Cancel active clone jobs"),
 ]
 
 # Extra commands shown only to admins (in addition to DEFAULT_COMMANDS).

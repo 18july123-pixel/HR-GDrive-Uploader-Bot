@@ -365,71 +365,6 @@ async def cmd_rename(message: Message, command: CommandObject, state: FSMContext
     await message.answer("✏️ Send the new name.")
 
 
-@router.message(Command("copy"))
-async def cmd_copy(message: Message, command: CommandObject):
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    if not command.args:
-        await message.answer("Usage: /copy [file or folder link]")
-        return
-
-    source_id = drive_service.extract_id_from_link(command.args.strip())
-    if not source_id:
-        await message.answer("❌ Couldn't parse that as a Drive file or folder link.")
-        return
-
-    token = json.loads(user["google_token"])
-    try:
-        meta = await asyncio.to_thread(drive_service.get_file_meta, token, source_id)
-        destination_id = await asyncio.to_thread(
-            drive_service.ensure_default_folder, user, token
-        )
-
-        size = None if meta.get("mimeType") == FOLDER_MIME else int(meta.get("size", 0) or 0)
-        duplicate = await asyncio.to_thread(
-            drive_service.find_duplicate_in_folder,
-            token,
-            destination_id,
-            meta.get("name", ""),
-            meta.get("mimeType"),
-            size,
-        )
-        if duplicate:
-            try:
-                duplicate_link = await asyncio.to_thread(
-                    drive_service.get_file_link, token, duplicate["id"]
-                )
-            except Exception:
-                duplicate_link = duplicate.get("webViewLink")
-            await message.answer(
-                "⚠️ Duplicate detected in HR Gdrive.\n\n"
-                f"📄 {html_link(duplicate['name'], duplicate_link)}\n"
-                "Nothing was copied.",
-                parse_mode="HTML",
-            )
-            return
-
-        if meta["mimeType"] == FOLDER_MIME:
-            result = await asyncio.to_thread(
-                drive_service.clone_item, token, source_id, destination_id
-            )
-            icon = "📁"
-        else:
-            result = await asyncio.to_thread(
-                drive_service.copy, token, source_id, destination_id
-            )
-            icon = "📄"
-        link = await asyncio.to_thread(drive_service.get_file_link, token, result["id"])
-    except Exception as exc:
-        await message.answer(f"❌ Copy failed: {exc}")
-        return
-
-    db.log_action(message.from_user.id, "copy", result.get("name", source_id))
-    await message.answer(
-        f"✅ Copied to HR Gdrive\n\n{icon} {html_link(result.get('name', 'Copied item'), link)}",
-        parse_mode="HTML",
-    )
 
 
 @router.message(Command("delete"))
@@ -469,37 +404,3 @@ async def cmd_restore(message: Message, command: CommandObject):
     await message.answer("✅ Item restored from Trash.")
 
 
-@router.message(Command("search"))
-async def cmd_search(message: Message, command: CommandObject):
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    if not command.args:
-        await message.answer("Usage: /search [query]")
-        return
-    token = json.loads(user["google_token"])
-    drive = drive_service.get_drive(token)
-    query = command.args.replace("'", "\\'")
-    results = drive.files().list(
-        q=f"name contains '{query}' and trashed = false",
-        fields="files(id, name, mimeType, size)",
-        pageSize=20,
-    ).execute().get("files", [])
-    if not results:
-        await message.answer(f"🔍 No results for '{command.args}'.")
-        return
-    lines = []
-    for f in results:
-        icon = "📁" if f["mimeType"] == FOLDER_MIME else "📄"
-        lines.append(f"{icon} {f['name']}")
-    await message.answer(f"🔍 SEARCH RESULTS for '{command.args}'\n\n" + "\n".join(lines))
-
-
-@router.callback_query(F.data == "menu:search")
-async def cb_menu_search(call: CallbackQuery):
-    if not db.get_google_token(call.from_user.id):
-        await call.message.answer("☁️ Connect your Google Drive first with /login.")
-        await safe_answer(call)
-        return
-    await call.message.answer("🔍 Use: /search [query]")
-    await safe_answer(call)
