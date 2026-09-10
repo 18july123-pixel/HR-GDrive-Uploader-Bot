@@ -62,34 +62,34 @@ def _client(user_id: int | None = None):
     """Return an authenticated Mega client from env config if present,
     otherwise fall back to a stored per-user Mega account.
 
-    The fallback order is intentionally:
-      1. Configured account from env vars when present.
-      2. Stored per-user Mega account from the repository DB backend.
-      3. A friendly MegaNotConfigured error if neither exists.
+    Resolution order is intentionally conservative:
+      1. Env values if they are configured.
+      2. Stored per-user Mega account from the repo DB layer.
+      3. Friendly MegaNotConfigured if neither exists.
     """
     if Mega is None:
         detail = MEGA_IMPORT_ERROR or "unknown import failure"
         raise RuntimeError(
-            "mega.py is not installed or failed to import in this Python runtime. "
-            f"Add 'mega.py==1.0.8' to requirements.txt and restart the bot. "
-            f"Import detail: {detail}"
+            "mega.py failed to import in this Python runtime; "
+            f"details: {detail}. "
+            "Install the declared dependency in requirements.txt and restart the bot."
         )
 
     email = getattr(cfg, "MEGA_EMAIL", "").strip()
     password = getattr(cfg, "MEGA_PASSWORD", "").strip()
 
-    # Let the saved user account override any partial environment mismatch.
-    # This prevents the bot from detaching a stored Mega account after a
-    # process restart just because one of the optional env credentials is
-    # blank or because the handler only passed a user_id-scoped lookup.
+    # Token/user-scoped fallback must be consulted whenever the env pair is
+    # incomplete. That prevents an imported bot process from silently
+    # treating an already-saved Mega record as absent and then re-prompting
+    # the user for a fresh login after a restart.
     if user_id:
         creds = db.get_mega_credentials(user_id)
         if creds:
             db_email = str(creds.get("email", "") or "").strip()
             db_password = str(creds.get("password", "") or "").strip()
-            if not email:
+            if not email and db_email:
                 email = db_email
-            if not password:
+            if not password and db_password:
                 password = db_password
 
     if not email or not password:
