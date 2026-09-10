@@ -1,12 +1,13 @@
 import re
 import time
+import io
 import hashlib
 from contextlib import contextmanager
 from threading import Lock
 from typing import Dict
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError  # FIX #5: needed for structured error handling
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from google.auth.exceptions import RefreshError
 
 from google_auth import credentials_from_dict
@@ -22,6 +23,21 @@ MIME_TYPE_DESCRIPTIONS = {
     "application/vnd.google-apps.folder": "Google Drive folder",
     "application/vnd.google-apps.form": "Google Forms",
     "application/vnd.google-apps.spreadsheet": "Google Sheets",
+}
+
+EXPORT_FORMATS = {
+    "application/vnd.google-apps.document": (
+        "application/pdf",
+        ".pdf",
+    ),
+    "application/vnd.google-apps.spreadsheet": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xlsx",
+    ),
+    "application/vnd.google-apps.presentation": (
+        "application/pdf",
+        ".pdf",
+    ),
 }
 
 NATIVE_FILE_VIEW_URLS = {
@@ -629,6 +645,32 @@ def _export_mime_for_ext(ext: str) -> str | None:
     return mapping.get(ext)
 
 
+def export_file_to_stream(user_token: dict, file_id: str, ext: str) -> io.BytesIO:
+    """Export a Google-native file into an in-memory BytesIO stream using the
+    REST export shape that Google publishes for Documents, Sheets, and Slides.
+
+    This mirrors the requested MediaIoBaseDownload pattern, while keeping the
+    repo's existing extension mapping stable for file downloads and Telegram
+    send flows.
+    """
+    meta = get_file_meta(user_token, file_id)
+    mime = meta.get("mimeType")
+    export_mime = _export_mime_for_ext(ext)
+    if not export_mime:
+        raise RuntimeError(f"Unsupported export format: {ext}")
+
+    with _handle_drive_errors(f"exporting file '{file_id}' to {ext}"):
+        drive = get_drive(user_token)
+        req = drive.files().export(fileId=file_id, mimeType=export_mime)
+        stream = io.BytesIO()
+        downloader = MediaIoBaseDownload(stream, req)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        stream.seek(0)
+        return stream
+
+
 def export_file_to_path(user_token: dict, file_id: str, ext: str, dest_path: str | None = None) -> str:
     """Export a Google-native file to a local path and return that path.
 
@@ -647,9 +689,13 @@ def export_file_to_path(user_token: dict, file_id: str, ext: str, dest_path: str
     with _handle_drive_errors(f"exporting file '{file_id}' to {ext}"):
         drive = get_drive(user_token)
         req = drive.files().export(fileId=file_id, mimeType=export_mime)
-        data = req.execute(num_retries=3)
+        stream = io.BytesIO()
+        downloader = MediaIoBaseDownload(stream, req)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        data = stream.getvalue()
 
-    # data may be bytes or str
     if isinstance(data, str):
         data = data.encode("utf-8")
 

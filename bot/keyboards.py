@@ -42,6 +42,7 @@ def duplicate_confirm(job_id: str) -> InlineKeyboardMarkup:
 def help_menu() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(
+        InlineKeyboardButton(text="☁️ My Drive", callback_data="menu:drive"),
         InlineKeyboardButton(text="👤 My Account", callback_data="menu:account"),
     )
     return b.as_markup()

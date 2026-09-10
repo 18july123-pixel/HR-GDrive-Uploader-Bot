@@ -6,6 +6,8 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
 from aiogram.types import InputFile
 from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton
 
 import database as db
 import drive_service
@@ -128,10 +130,17 @@ async def cb_drive_doexport(call: CallbackQuery):
     meta = drive_service.get_file_meta(token, file_id)
     await call.message.answer(f"🔄 Exporting {meta.get('name')} as {fmt}...")
     try:
-        path = await asyncio.to_thread(drive_service.export_file_to_path, token, file_id, fmt)
-        await call.message.answer_document(InputFile(path), caption=f"{meta.get('name')}.{fmt}")
+        stream = await asyncio.to_thread(drive_service.export_file_to_stream, token, file_id, fmt)
+        filename = f"{meta.get('name')}.{fmt}"
+        await call.message.answer_document(InputFile(stream, filename=filename), caption=filename)
     except Exception as e:
-        await call.message.answer(f"⚠️ Export failed: {e}")
+        # Preserve the path fallback for environments where the in-memory stream
+        # export is unavailable and allow the repo's original path convertor to run.
+        try:
+            path = await asyncio.to_thread(drive_service.export_file_to_path, token, file_id, fmt)
+            await call.message.answer_document(InputFile(path), caption=f"{meta.get('name')}.{fmt}")
+        except Exception as fallback_error:
+            await call.message.answer(f"⚠️ Export failed: {fallback_error}")
     await safe_answer(call)
 
 
