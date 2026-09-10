@@ -102,10 +102,7 @@ async def start_url_uploader_mode(message: Message):
 
 @router.message(Command("uploader"))
 async def cmd_uploader(message: Message):
-    # Admin-gate this command while keeping the existing bot architecture.
-    if not is_admin(message.from_user.id):
-        await message.answer("⛔ This command is reserved for admins only.")
-        return
+    # Open the uploader path for any user in the chat.
     await start_url_uploader_mode(message)
 
 
