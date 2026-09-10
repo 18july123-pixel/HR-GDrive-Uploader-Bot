@@ -11,6 +11,69 @@ from bot.keyboards import login_keyboard, logout_confirm
 router = Router()
 
 
+@router.message(Command("mega_login"))
+async def cmd_mega_login(message: Message, command: CommandObject):
+    db.upsert_user(message.from_user.id, message.from_user.username)
+    if not command.args:
+        await message.answer(
+            "Usage: /mega_login <email> <password>\n"
+            "Example: /mega_login you@example.com yoursecretpassword"
+        )
+        return
+
+    parts = command.args.strip().split(maxsplit=1)
+    if len(parts) != 2:
+        await message.answer("Usage: /mega_login <email> <password>\nThe password is the rest of the text after the first whitespace.")
+        return
+
+    email = parts[0].strip()
+    password = parts[1].strip()
+    if not email or not password:
+        await message.answer("Mega login needs a non-empty email and password.")
+        return
+
+    db.set_mega_account(message.from_user.id, email, password)
+    db.log_action(message.from_user.id, "mega_login", email)
+    await message.answer(f"✅ Mega.nz account saved for: {email}\nUse /mega_accounts to view saved accounts.")
+
+
+@router.message(Command("mega_logout"))
+async def cmd_mega_logout(message: Message):
+    db.clear_mega_account(message.from_user.id)
+    db.log_action(message.from_user.id, "mega_logout")
+    await message.answer("✅ Mega.nz account has been disconnected from this bot profile.")
+
+
+@router.message(Command("mega_accounts"))
+async def cmd_mega_accounts(message: Message):
+    accounts = db.get_mega_accounts(message.from_user.id)
+    if not accounts:
+        await message.answer("☁️ No Mega.nz accounts connected. Use /mega_login <email> <password>.")
+        return
+    lines = ["☁️ CONNECTED MEGA.NZ ACCOUNTS\n"]
+    for index, account in enumerate(accounts, 1):
+        marker = "✅ Default" if account.get("is_default") else ""
+        lines.append(f"{index}. {account['email']} {marker}")
+    lines.append("\nUse /mega_useaccount [email or number] to choose the default Mega account.")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("mega_useaccount"))
+async def cmd_mega_useaccount(message: Message, command: CommandObject):
+    if not command.args:
+        await message.answer("Usage: /mega_useaccount [email or account number]\nUse /mega_accounts to list accounts.")
+        return
+    accounts = db.get_mega_accounts(message.from_user.id)
+    reference = command.args.strip()
+    if reference.isdigit():
+        index = int(reference) - 1
+        reference = accounts[index]["email"] if 0 <= index < len(accounts) else reference
+    if not db.set_default_mega_account(message.from_user.id, reference):
+        await message.answer("❌ Account not found. Use /mega_accounts to list connected accounts.")
+        return
+    await message.answer(f"✅ Default Mega.nz account set to: {reference}")
+
+
 @router.message(Command("login"))
 async def cmd_login(message: Message):
     db.upsert_user(message.from_user.id, message.from_user.username)

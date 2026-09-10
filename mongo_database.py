@@ -124,6 +124,64 @@ def get_google_accounts(user_id: int):
             for account in user.get("google_accounts", [])]
 
 
+def set_mega_account(user_id: int, email: str, password: str):
+    user = get_user(user_id) or {}
+    accounts = user.get("mega_accounts", [])
+    found = False
+    for account in accounts:
+        if account.get("email") == email:
+            account["password"] = password
+            found = True
+    if not found:
+        accounts.append({"account_id": str(len(accounts) + 1), "email": email,
+                         "password": password, "is_default": not accounts,
+                         "created_at": int(time.time())})
+    default = next((a for a in accounts if a.get("is_default")), accounts[0])
+    _users.update_one(
+        {"user_id": user_id},
+        {"$set": {"mega_accounts": accounts,
+                  "mega_email": default["email"], "mega_token": default["password"]}},
+        upsert=True,
+    )
+
+
+def clear_mega_account(user_id: int):
+    user = get_user(user_id) or {}
+    accounts = user.get("mega_accounts", [])
+    default = next((a for a in accounts if a.get("is_default")), None)
+    accounts = [a for a in accounts if not default or a.get("account_id") != default.get("account_id")]
+    if accounts:
+        accounts[0]["is_default"] = True
+        _users.update_one({"user_id": user_id}, {"$set": {"mega_accounts": accounts, "mega_email": accounts[0]["email"], "mega_token": accounts[0]["password"]}})
+    else:
+        _users.update_one({"user_id": user_id}, {"$unset": {"mega_accounts": "", "mega_email": "", "mega_token": ""}})
+
+
+def get_mega_accounts(user_id: int):
+    user = get_user(user_id) or {}
+    return [{k: account.get(k) for k in ("account_id", "email", "is_default", "created_at")}
+            for account in user.get("mega_accounts", [])]
+
+
+def set_default_mega_account(user_id: int, account_ref: str) -> bool:
+    user = get_user(user_id) or {}
+    accounts = user.get("mega_accounts", [])
+    selected = next((a for a in accounts if a.get("email") == account_ref or str(a.get("account_id")) == account_ref), None)
+    if not selected:
+        return False
+    for account in accounts:
+        account["is_default"] = account is selected
+    _users.update_one({"user_id": user_id}, {"$set": {"mega_accounts": accounts, "mega_email": selected["email"], "mega_token": selected["password"]}})
+    return True
+
+
+def get_mega_credentials(user_id: int):
+    user = get_user(user_id)
+    if not user or not user.get("mega_email") or not user.get("mega_token"):
+        return None
+    return {"email": user["mega_email"], "password": user["mega_token"]}
+
+
 def set_default_account(user_id: int, account_ref: str) -> bool:
     user = get_user(user_id) or {}
     accounts = user.get("google_accounts", [])

@@ -14,6 +14,7 @@ from aiogram.fsm.context import FSMContext
 
 import database as db
 import drive_service
+import mega_service
 from config import cfg
 from utils import format_duration, html_link, human_bytes, progress_bar, safe_answer, safe_edit_text, user_message
 from bot.states import UploadStates
@@ -134,10 +135,26 @@ async def cmd_upload(message: Message, state: FSMContext):
     if not user:
         return
     await state.set_state(UploadStates.waiting_file)
+    await state.update_data(upload_backend="drive")
     await message.answer(
         "📤 Send one or more files (documents, videos, audio, or photos).\n"
         "They will upload one at a time in the order received.\n"
         f"It will go to your default folder: <b>{html.escape(cfg.DEFAULT_UPLOAD_FOLDER_NAME)}</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("megaupload"))
+async def cmd_megaupload(message: Message, state: FSMContext):
+    """Separate command for Mega.nz uploads. It asks the user to send a file,
+    then the same UploadStates waiter will be used, but routes the upload
+    object through Mega instead of Drive when the Telegram file is received."""
+    await state.set_state(UploadStates.waiting_file)
+    await state.update_data(upload_backend="mega")
+    await message.answer(
+        "☁️ Mega.nz upload mode enabled.\n"
+        "Send a file and it will be uploaded to your configured Mega.nz account.\n"
+        "This command uses the separate Mega.nz backend and does not need Drive auth.",
         parse_mode="HTML",
     )
 
@@ -384,6 +401,9 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
         return
     token = json.loads(user["google_token"])
 
+    data = await state.get_data()
+    backend = str(data.get("upload_backend") or "drive")
+
     # Normalize all supported Telegram media shapes into a common tuple:
     # (telegram_file_obj, filename, size_bytes).
     tg_file = None
@@ -437,10 +457,22 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
         )
         return
 
+    # If the selected backend is Mega.nz, do not require Drive auth.
+    if backend == "mega":
+        token = None
+    else:
+        user = await _ensure_connected(message)
+        if not user:
+            return
+        token = json.loads(user["google_token"])
+
     safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
     safe_filename = safe_filename[:180] if len(safe_filename) > 180 else safe_filename
 
-    folder_id = await _ensure_default_folder(user, token)
+    folder_id = None
+    destination_path = "Mega.nz"
+    if backend == "drive":
+        folder_id = await _ensure_default_folder(user, token)
     try:
         destination_path = await asyncio.to_thread(drive_service.get_folder_path, token, folder_id)
     except Exception:
@@ -455,8 +487,8 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
             done=0,
             total=size,
             destination=destination_path,
-            stage="Downloading from Telegram",
-            status_text="Downloading...",
+            stage="Downloading from Telegram" if backend == "drive" else "Preparing Mega.nz upload",
+            status_text="Downloading..." if backend == "drive" else "Preparing...",
             elapsed=0,
         ),
         parse_mode="HTML",
@@ -476,6 +508,7 @@ async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
         local_path=local_path,
         status_msg=status_msg,
         priority=10,
+        backend=backend,
     )
     position = manager.enqueue(job)
     queue_summary = manager.queue_summary(job_id)

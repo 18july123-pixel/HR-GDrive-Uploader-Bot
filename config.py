@@ -147,6 +147,10 @@ class Config:
     # Default sharing permission applied when a link is generated.
     DEFAULT_SHARE_ROLE = os.getenv("DEFAULT_SHARE_ROLE", "reader")   # reader = Viewer
 
+    # Mega.nz credentials for optional separate Mega upload command.
+    MEGA_EMAIL = os.getenv("MEGA_EMAIL", "").strip()
+    MEGA_PASSWORD = os.getenv("MEGA_PASSWORD", "").strip()
+
     # Limits
     FREE_UPLOAD_LIMIT_GB = float(os.getenv("FREE_UPLOAD_LIMIT_GB", "4"))
     PREMIUM_UPLOAD_LIMIT_GB = float(os.getenv("PREMIUM_UPLOAD_LIMIT_GB", "50"))
