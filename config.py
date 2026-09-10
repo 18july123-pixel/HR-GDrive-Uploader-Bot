@@ -85,7 +85,7 @@ def _detect_public_base_url() -> str:
 class Config:
     # Telegram
     BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-    ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
+    ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8457503781").split(",") if x.strip()]
 
     # Google OAuth
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
