@@ -57,6 +57,77 @@ def get_drive(user_token_or_creds):
 
 
 @contextmanager
+def _handle_docs_errors(operation: str):
+    try:
+        yield
+    except (HttpError, RefreshError) as e:
+        reason = getattr(e, "reason", None) or str(e)
+        raise RuntimeError(f"Docs API error while {operation}: {reason}") from e
+
+
+def get_docs(user_token_or_creds):
+    """Return a Google Docs API client for the given user credentials or global client."""
+    if isinstance(user_token_or_creds, dict):
+        creds = credentials_from_dict(user_token_or_creds)
+    elif isinstance(user_token_or_creds, GoogleCredentials):
+        creds = user_token_or_creds
+    elif user_token_or_creds is None:
+        client = google_manager.get_available_client()
+        if not client:
+            raise RuntimeError("No Google clients available in manager")
+        creds = google_manager.get_credentials_for(client)
+    else:
+        creds = user_token_or_creds
+    return build("docs", "v1", credentials=creds, cache_discovery=False)
+
+
+def get_document(user_token: dict, document_id: str, fields: str | None = None) -> dict:
+    with _handle_docs_errors(f"reading document '{document_id}'"):
+        docs = get_docs(user_token)
+        request = docs.documents().get(documentId=document_id)
+        if fields:
+            request = request.fields(fields)
+        return request.execute(num_retries=3)
+
+
+def create_document(user_token: dict, title: str, body: dict | None = None) -> dict:
+    with _handle_docs_errors(f"creating document '{title}'"):
+        payload = {"title": title}
+        if body:
+            payload.update(body)
+        return get_docs(user_token).documents().create(body=payload).execute(num_retries=3)
+
+
+def append_document_text(user_token: dict, document_id: str, text: str) -> dict:
+    """Append plain text to a Google Docs document using the REST batchUpdate API."""
+    with _handle_docs_errors(f"appending text to document '{document_id}'"):
+        # The REST insertText request takes a document location object and a
+        # text payload. Starting at index 1 is safe for an empty document and
+        # becomes the canonical append-on-demand pattern for a fresh doc body.
+        return get_docs(user_token).documents().batchUpdate(
+            documentId=document_id,
+            body={
+                "requests": [
+                    {
+                        "insertText": {
+                            "text": text,
+                            "location": {"index": 1},
+                        }
+                    }
+                ]
+            },
+        ).execute(num_retries=3)
+
+
+def batch_update_document(user_token: dict, document_id: str, requests: list[dict]) -> dict:
+    with _handle_docs_errors(f"batch updating document '{document_id}'"):
+        return get_docs(user_token).documents().batchUpdate(
+            documentId=document_id,
+            body={"requests": requests},
+        ).execute(num_retries=3)
+
+
+@contextmanager
 def _handle_sheets_errors(operation: str):
     try:
         yield
@@ -130,6 +201,38 @@ def append_spreadsheet_values(
             responseValueRenderOption=response_value_render_option,
             responseDateTimeRenderOption=response_date_time_render_option,
             body={"values": values},
+        ).execute(num_retries=3)
+
+
+def update_spreadsheet_values(
+    user_token: dict,
+    spreadsheet_id: str,
+    range_name: str,
+    values: list[list],
+    value_input_option: str = "RAW",
+    include_values_in_response: bool = False,
+    response_value_render_option: str = "FORMATTED_VALUE",
+    response_date_time_render_option: str = "FORMATTED_STRING",
+) -> dict:
+    """Update a Sheet range using the Google Sheets REST values.update endpoint."""
+    with _handle_sheets_errors(f"updating values in '{spreadsheet_id}' range '{range_name}'"):
+        return get_sheets(user_token).spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption=value_input_option,
+            includeValuesInResponse=include_values_in_response,
+            responseValueRenderOption=response_value_render_option,
+            responseDateTimeRenderOption=response_date_time_render_option,
+            body={"values": values},
+        ).execute(num_retries=3)
+
+
+def clear_spreadsheet_values(user_token: dict, spreadsheet_id: str, ranges: list[str]) -> dict:
+    """Clear one or more ranges in a spreadsheet via the REST batchClear endpoint."""
+    with _handle_sheets_errors(f"clearing values in '{spreadsheet_id}'"):
+        return get_sheets(user_token).spreadsheets().values().batchClear(
+            spreadsheetId=spreadsheet_id,
+            body={"ranges": ranges},
         ).execute(num_retries=3)
 
 
