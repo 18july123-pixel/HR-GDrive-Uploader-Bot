@@ -85,6 +85,47 @@ def sanitize_filename(name: str) -> str:
 sanitize_file_stem = sanitize_filename
 
 
+def make_progress_hook(loop, status_msg):
+    """Return a yt-dlp progress hook that edits Telegram status safely.
+
+    The hook runs inside yt-dlp's background download thread. It must not
+    reach into asyncio.get_running_loop() from that worker, because the
+    downloader thread has no event loop of its own. Instead, capture the
+    owning bot loop from the `status_msg` coroutine and schedule the safe
+    status message edits onto that loop via asyncio.run_coroutine_threadsafe.
+    """
+    def progress_hook(d: dict):
+        try:
+            if d.get("status") == "downloading":
+                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                done = d.get("downloaded_bytes") or 0
+                if total:
+                    pct = min(100, max(0, int((done / total) * 100)))
+                    now = time.monotonic()
+                    if getattr(progress_hook, "last_update", 0) + 1.2 < now:
+                        progress_hook.last_update = now
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                safe_edit_text(status_msg, f"⬇️ Downloading... {pct}%"),
+                                loop,
+                            )
+                        except Exception:
+                            pass
+                elif d.get("status") == "finished":
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            safe_edit_text(status_msg, "⚙️ Processing media..."),
+                            loop,
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    progress_hook.last_update = 0.0
+    return progress_hook
+
+
 def default_download_dir_for_job(job_id: str) -> str:
     base = os.path.abspath(getattr(cfg, "DOWNLOAD_DIR", os.path.join(os.getcwd(), "downloads")))
     tmp = os.path.join(base, "temp", job_id)
@@ -269,34 +310,7 @@ async def start_download(job_id: str, status_message: Message | CallbackQuery, r
             "progress_hooks": [],
         }
 
-        def progress_hook(d: dict):
-            try:
-                if d.get("status") == "downloading":
-                    total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                    done = d.get("downloaded_bytes") or 0
-                    if total:
-                        pct = min(100, max(0, int((done / total) * 100)))
-                        now = time.monotonic()
-                        # throttle Telegram message edits to avoid flooding API calls
-                        if getattr(progress_hook, "last_update", 0) + 1.2 < now:
-                            progress_hook.last_update = now
-                            asyncio.run_coroutine_threadsafe(
-                                safe_edit_text(status_msg, f"⬇️ Downloading... {pct}%"),
-                                asyncio.get_running_loop(),
-                            )
-                elif d.get("status") == "finished":
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            safe_edit_text(status_msg, "⚙️ Processing media..."),
-                            asyncio.get_running_loop(),
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-        progress_hook.last_update = 0.0
-        ydl_opts["progress_hooks"] = [progress_hook]
+        ydl_opts["progress_hooks"] = [make_progress_hook(asyncio.get_running_loop(), status_msg)]
 
         try:
             await safe_edit_text(status_msg, "⬇️ Downloading... 0%")
