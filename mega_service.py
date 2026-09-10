@@ -1,13 +1,25 @@
 import os
 import re
+import asyncio
+import types
 
 from config import cfg
 import database as db
 
+MEGA_IMPORT_ERROR = None
+
+# mega.py 1.0.8 still relies on asyncio.coroutine(), which was removed
+# from newer Python runtimes. Provide a tiny compatibility shim before the
+# import so the service can surface the real backend problem instead of
+# masquerading it as "mega.py is not installed".
+if not hasattr(asyncio, "coroutine"):
+    asyncio.coroutine = types.coroutine
+
 try:
     from mega import Mega
-except Exception:  # pragma: no cover - dependency error surfaces clearly
+except Exception as exc:  # pragma: no cover - dependency error surfaces clearly
     Mega = None
+    MEGA_IMPORT_ERROR = str(exc)
 
 
 def _is_folder_public_url(url: str) -> bool:
@@ -49,18 +61,36 @@ def is_mega_link(link: str | None) -> bool:
 def _client(user_id: int | None = None):
     """Return an authenticated Mega client from env config if present,
     otherwise fall back to a stored per-user Mega account.
+
+    The fallback order is intentionally:
+      1. Configured account from env vars when present.
+      2. Stored per-user Mega account from the repository DB backend.
+      3. A friendly MegaNotConfigured error if neither exists.
     """
     if Mega is None:
-        raise RuntimeError("mega.py is not installed. Add 'mega.py' to requirements.txt and restart the bot.")
+        detail = MEGA_IMPORT_ERROR or "unknown import failure"
+        raise RuntimeError(
+            "mega.py is not installed or failed to import in this Python runtime. "
+            f"Add 'mega.py==1.0.8' to requirements.txt and restart the bot. "
+            f"Import detail: {detail}"
+        )
 
     email = getattr(cfg, "MEGA_EMAIL", "").strip()
     password = getattr(cfg, "MEGA_PASSWORD", "").strip()
 
-    if not email and user_id:
+    # Let the saved user account override any partial environment mismatch.
+    # This prevents the bot from detaching a stored Mega account after a
+    # process restart just because one of the optional env credentials is
+    # blank or because the handler only passed a user_id-scoped lookup.
+    if user_id:
         creds = db.get_mega_credentials(user_id)
         if creds:
-            email = creds.get("email", "").strip()
-            password = creds.get("password", "").strip()
+            db_email = str(creds.get("email", "") or "").strip()
+            db_password = str(creds.get("password", "") or "").strip()
+            if not email:
+                email = db_email
+            if not password:
+                password = db_password
 
     if not email or not password:
         raise MegaNotConfigured("MEGA_EMAIL and MEGA_PASSWORD must be set before using Mega.nz uploads, or save a Mega account with /mega_login.")

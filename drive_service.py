@@ -200,13 +200,25 @@ def batch_get_spreadsheet_values_by_data_filter(user_token: dict, spreadsheet_id
             spreadsheetId=spreadsheet_id,
             body={"dataFilters": data_filters, "majorDimension": major_dimension},
         ).execute(num_retries=3)
-    # FIX #5: wrap Drive API call so callers get a clear error message
+
+
+def get_about(user_token: dict) -> dict:
+    """Return a normalized Drive account info summary for the bot UI.
+
+    Expected return structure:
+    {
+        'email': str | None,
+        'usage_bytes': int,
+        'limit_bytes': int | None,
+    }
+    """
     try:
         drive = get_drive(user_token)
         about = drive.about().get(fields="storageQuota,user").execute(num_retries=3)
     except (HttpError, RefreshError) as e:
         reason = getattr(e, "reason", None) or str(e)
         raise RuntimeError(f"Drive API error fetching account info: {reason}") from e
+
     quota = about.get("storageQuota", {})
     limit = int(quota.get("limit", 0)) if quota.get("limit") else None
     usage = int(quota.get("usage", 0))
