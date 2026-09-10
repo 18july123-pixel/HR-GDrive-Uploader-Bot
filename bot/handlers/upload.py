@@ -128,27 +128,6 @@ def _make_upload_card(
     return "\n".join(lines)
 
 
-@router.message(Command("upload"))
-async def cmd_upload(message: Message, state: FSMContext):
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    await state.set_state(UploadStates.waiting_file)
-    await state.update_data(upload_backend="drive")
-    await message.answer(
-        "📤 Send one or more files (documents, videos, audio, or photos).\n"
-        "They will upload one at a time in the order received.\n"
-        f"It will go to your default folder: <b>{html.escape(cfg.DEFAULT_UPLOAD_FOLDER_NAME)}</b>",
-        parse_mode="HTML",
-    )
-
-
-@router.callback_query(F.data == "menu:upload")
-async def cb_upload(call: CallbackQuery, state: FSMContext):
-    await cmd_upload(user_message(call), state)
-    await safe_answer(call)
-
-
 def _duplicate_warning_text(filename: str, size: int, candidate: dict, extra_count: int) -> str:
     # The bot defaults to HTML parse mode; escape anything that came from a
     # filename (user- or Drive-controlled) before interpolating it in.
@@ -376,17 +355,15 @@ def _ensure_upload_worker(user_id: int):
 
 
 @router.message(
-    UploadStates.waiting_file,
     F.document | F.video | F.audio | F.photo | F.animation | F.voice | F.video_note | F.sticker,
 )
-async def handle_incoming_file(message: Message, state: FSMContext, bot: Bot):
+async def handle_incoming_file(message: Message, bot: Bot):
     user = await _ensure_connected(message)
     if not user:
         return
     token = json.loads(user["google_token"])
 
-    data = await state.get_data()
-    backend = str(data.get("upload_backend") or "drive")
+    backend = "drive"
 
     # Normalize all supported Telegram media shapes into a common tuple:
     # (telegram_file_obj, filename, size_bytes).

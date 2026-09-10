@@ -39,24 +39,18 @@ async def _ensure_connected(message: Message) -> dict | None:
     return user
 
 
-@router.message(Command("clone"))
-async def cmd_clone(message: Message, command: CommandObject, state: FSMContext):
-    link = command.args
-    if not link:
-        await state.set_state(CloneStates.waiting_link)
-        await message.answer("🔗 Send me the Google Drive link (file or folder) you want to clone.")
-        return
-
-    await _process_clone_link(message, db.get_user(message.from_user.id), link)
-
-
-@router.message(Command("copy"))
-async def cmd_copy_alias(message: Message, command: CommandObject, state: FSMContext):
-    """Backward-compatibility alias: treat `/copy` as the same Drive-link
-    duplication entry point as `/clone`. This unifies both command flows into
-    one command surface while keeping the older command spelling alive.
+@router.message(F.text)
+async def auto_clone_from_text(message: Message):
+    """Auto-clone a Google Drive file/folder link sent in a normal chat text
+    message. The old explicit /clone command is removed on purpose so link
+    messages are accepted directly and processed without a command prefix.
     """
-    await cmd_clone(message, command, state)
+    text = (message.text or "").strip()
+    if not text or text.startswith("/"):
+        return
+    if detect_provider(text) != "drive":
+        return
+    await _process_clone_link(message, db.get_user(message.from_user.id), text)
 
 
 @router.message(CloneStates.waiting_link)

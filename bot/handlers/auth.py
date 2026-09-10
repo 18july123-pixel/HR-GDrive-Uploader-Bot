@@ -118,7 +118,6 @@ async def cmd_me(message: Message, override_user_id: int | None = None):
         "Telegram\n"
         f"├── ID: {user_id}\n"
         f"├── Username: @{user['username'] or 'n/a'}\n"
-        f"└── Plan: {'⭐ Premium' if user['is_premium'] else '🆓 Free'}\n\n"
         "☁️ Google Drive\n"
         f"├── Account: {about['email']}\n"
         "├── Status: 🟢 Connected\n"

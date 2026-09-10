@@ -30,12 +30,7 @@ async def cmd_admin(message: Message):
         "/users — user list\n"
         "/user [id] — user details\n"
         "/ban [id] / /unban [id]\n"
-        "/premium [id] / /remove_premium [id]\n"
         "/broadcast — message all users\n"
-        "/drives — connected Drive accounts\n"
-        "/driveinfo [id] — a user's Drive info\n"
-        "/jobs — all active jobs\n"
-        "/logs — recent activity\n"
         "/bot_on / /bot_off\n"
         "/maintenance on|off"
     )
@@ -53,8 +48,6 @@ async def cmd_users(message: Message):
         flags = []
         if u["is_banned"]:
             flags.append("🚫")
-        if u["is_premium"]:
-            flags.append("⭐")
         if u["google_token"]:
             flags.append("☁️")
         lines.append(f"{u['user_id']} @{u['username'] or 'n/a'} {' '.join(flags)}")
@@ -79,7 +72,6 @@ async def cmd_user(message: Message, command: CommandObject):
         f"👤 USER {uid}\n\n"
         f"Username: @{u['username'] or 'n/a'}\n"
         f"Banned: {'Yes' if u['is_banned'] else 'No'}\n"
-        f"Premium: {'Yes' if u['is_premium'] else 'No'}\n"
         f"Drive connected: {'Yes (' + u['google_email'] + ')' if u['google_token'] else 'No'}\n"
         f"Uploads: {u['uploads_count']} ({human_bytes(u['uploaded_bytes'])})\n"
         f"Clones: {u['clones_count']} ({human_bytes(u['cloned_bytes'])})"
@@ -113,34 +105,6 @@ async def cmd_unban(message: Message, command: CommandObject):
         return
     db.update_user_field(uid, "is_banned", 0)
     await message.answer(f"✅ User {uid} unbanned.")
-
-
-@router.message(Command("premium"))
-async def cmd_premium(message: Message, command: CommandObject):
-    if not command.args:
-        await message.answer("Usage: /premium [telegram_id]")
-        return
-    try:
-        uid = int(command.args.strip())
-    except ValueError:
-        await message.answer("Invalid Telegram ID.")
-        return
-    db.update_user_field(uid, "is_premium", 1)
-    await message.answer(f"⭐ User {uid} upgraded to Premium.")
-
-
-@router.message(Command("remove_premium"))
-async def cmd_remove_premium(message: Message, command: CommandObject):
-    if not command.args:
-        await message.answer("Usage: /remove_premium [telegram_id]")
-        return
-    try:
-        uid = int(command.args.strip())
-    except ValueError:
-        await message.answer("Invalid Telegram ID.")
-        return
-    db.update_user_field(uid, "is_premium", 0)
-    await message.answer(f"🆓 User {uid} downgraded to Free.")
 
 
 @router.message(Command("broadcast"))
@@ -180,41 +144,6 @@ async def _do_broadcast(message: Message, text: str):
     await status.edit_text(f"✅ Broadcast done. Sent: {sent}, Failed: {failed}")
 
 
-@router.message(Command("drives"))
-async def cmd_drives(message: Message):
-    users = [u for u in db.all_users() if u["google_token"]]
-    if not users:
-        await message.answer("No connected Drive accounts.")
-        return
-    lines = [f"{u['user_id']} — {u['google_email']}" for u in users[:50]]
-    await message.answer(f"☁️ CONNECTED DRIVES ({len(users)})\n\n" + "\n".join(lines))
-
-
-@router.message(Command("driveinfo"))
-async def cmd_driveinfo(message: Message, command: CommandObject):
-    import json
-    import drive_service
-    if not command.args:
-        await message.answer("Usage: /driveinfo [telegram_id]")
-        return
-    try:
-        uid = int(command.args.strip())
-    except ValueError:
-        await message.answer("Invalid Telegram ID.")
-        return
-    u = db.get_user(uid)
-    if not u or not u.get("google_token"):
-        await message.answer("That user has no connected Drive.")
-        return
-    about = drive_service.get_about(json.loads(u["google_token"]))
-    await message.answer(
-        f"☁️ DRIVE INFO — {uid}\n\n"
-        f"Email: {about['email']}\n"
-        f"Used: {human_bytes(about['usage_bytes'])} / "
-        f"{human_bytes(about['limit_bytes']) if about['limit_bytes'] else '∞'}"
-    )
-
-
 @router.message(Command("bot_on"))
 async def cmd_bot_on(message: Message):
     db.set_state("bot_enabled", "1")
@@ -248,7 +177,6 @@ async def cmd_admin_stats(message: Message):
         "📊 BOT ANALYTICS\n\n"
         f"Total users: {len(users)}\n"
         f"Connected drives: {sum(1 for u in users if u['google_token'])}\n"
-        f"Premium users: {sum(1 for u in users if u['is_premium'])}\n"
         f"Total uploads: {total_uploads} ({human_bytes(total_uploaded)})\n"
         f"Total clones: {total_clones} ({human_bytes(total_cloned)})"
     )

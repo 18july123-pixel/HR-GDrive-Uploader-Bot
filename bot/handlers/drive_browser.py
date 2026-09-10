@@ -331,21 +331,6 @@ async def cb_share_role(call: CallbackQuery):
     await safe_answer(call, f"Role set to {drive_service.ROLE_LABELS.get(role, role)}")
 
 
-@router.message(Command("link"))
-async def cmd_link(message: Message, command: CommandObject):
-    user = await _ensure_connected(message)
-    if not user:
-        return
-    if not command.args:
-        await message.answer("Usage: /link [file link or ID]")
-        return
-    file_id = drive_service.extract_id_from_link(command.args.strip())
-    if not file_id:
-        await message.answer("❌ Couldn't parse that as a Drive link/ID.")
-        return
-    token = json.loads(user["google_token"])
-    link = drive_service.get_link(token, file_id)
-    await message.answer(f"🔗 {link}")
 
 
 @router.message(Command("rename"))
